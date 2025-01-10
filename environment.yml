@@ -1,4 +1,4 @@
-name: earth_obs_seg2
+name: shark_env
 channels:
   - conda-forge
   - defaults
