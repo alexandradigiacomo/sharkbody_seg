@@ -16,7 +16,7 @@ encoder_name: 'resnet34'        # choose encoder, e.g. mobilenet_v2 or efficient
 encoder_weights: 'imagenet'     # use `imagenet` pre-trained weights for encoder initialization
 in_channels: 3                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
 out_channels: 1                 # number of model output channels, e.g., 1 for binary classification
-image_size: 256                 # added by AD because image_size was missing in yaml
+image_size: 224                 # added by AD because image_size was missing in yaml
 
 experiment_key: 'demo_run'
 path_data: '/mnt/class_data/group2/alexandradigiacomo/dataset/' # replace this with your data path
