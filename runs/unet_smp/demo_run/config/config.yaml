@@ -18,7 +18,7 @@ in_channels: 3                  # model input channels (1 for gray-scale images,
 out_channels: 1                 # number of model output channels, e.g., 1 for binary classification
 
 experiment_key: 'demo_run'
-path_data: './data/oxfordpetdataset/' # replace this with your data path
+path_data: '/mnt/class_data/group2/alexandradigiacomo/dataset/' # replace this with your data path
 path_checkpoints: './runs/unet_smp/demo_run/checkpoints' # Store model checkpoints
 
 # training hyperparameters
