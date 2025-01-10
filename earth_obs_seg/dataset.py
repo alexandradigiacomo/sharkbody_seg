@@ -18,8 +18,7 @@ from torch.utils.data import Dataset
 from torchvision.transforms import Compose, Resize, ToTensor
 from PIL import Image
 
-
-class CTDataset(Dataset):
+class SharkBody(Dataset):
 
     def __init__(self, cfg, split='train'):
         '''
