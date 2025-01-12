@@ -21,7 +21,7 @@ class SharkBody(Dataset):
         
         annotations_path = os.path.join( # path to annotations
             self.data_root, 'annotations', 
-            'train.json' if self.split == 'train' else ('val.json' if self.split == 'val' else 'test.json')) # choose one of three splits
+            'train.json' if self.split == 'train' else 'val.json') # choose one of two splits
 
         self.coco = COCO(annotations_path) 
         self.data = [] # for storing masks
