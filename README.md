@@ -4,8 +4,6 @@ Barebone template code for training UNet for segmentation of shark bodies from a
 ## Installation
 We recommend installing the project via [conda](https://docs.conda.io/en/latest/).
 ```
-# click 'use this template' -> 'create a new repository' -> use your_repo_name
-# replace 'earth_obs_seg' with 'your_repo_name'
 git clone git@github.com:<username>/sharkbody_seg.git
 cd sharkbody_seg
 conda create -n sharkbody_seg python=3.12.8
