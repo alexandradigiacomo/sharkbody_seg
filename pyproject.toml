@@ -1,5 +1,5 @@
 [project]
-name = "earth_obs_seg"
+name = "sharkbody_seg"
 version = "0.1.0"
 description = "Template repository for segmentation in earth obs data"
 authors = [
