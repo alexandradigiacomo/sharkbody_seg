@@ -12,7 +12,7 @@ from tqdm import tqdm
 from pprint import pprint
 from osgeo import gdal
 import segmentation_models_pytorch as smp
-from ## import SharkBody ##  (?) how to modify this here
+from sharkbody_seg.dataset import SharkBody # (?) check how this works
 
 # Import helpful functions and classes from pytorch
 import torch
@@ -85,8 +85,9 @@ if __name__ == '__main__':
     # Create dataset and split it into train and val dataset. (?? I don't think I need this?)
     if not os.path.exists(cfg['path_data']):
         SharkBody.download(cfg['path_data'])
-    train_set = SharkBody(cfg['path_data'], "train")
-    val_set = SharkBody(cfg['path_data'], "valid")
+    
+    train_set = SharkBody(cfg, split="train")
+    val_set = SharkBody(cfg, split="valid")
 
     loader_args = dict(batch_size=cfg['batch_size'],
                        num_workers=cfg['num_workers'],
