@@ -12,7 +12,7 @@ from tqdm import tqdm
 from pprint import pprint
 from osgeo import gdal
 import segmentation_models_pytorch as smp
-from segmentation_models_pytorch.datasets import SimpleOxfordPetDataset ##  (?) how to modify this here
+from ## import SharkBody ##  (?) how to modify this here
 
 # Import helpful functions and classes from pytorch
 import torch
@@ -20,9 +20,9 @@ import torch.nn as nn
 from torch import optim
 from torch.utils.data import DataLoader
 
-from earth_obs_seg.eval.online_eval import online_eval
-from earth_obs_seg.utils.utils import set_all_seeds
-from earth_obs_seg.utils.utils import lookup_torch_dtype
+from sharkbody_seg.eval.online_eval import online_eval
+from sharkbody_seg.utils.utils import set_all_seeds
+from sharkbody_seg.utils.utils import lookup_torch_dtype
 
 def get_args():
     parser = argparse.ArgumentParser(description='Train the UNet on images and target masks')
