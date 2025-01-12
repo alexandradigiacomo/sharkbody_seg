@@ -12,7 +12,7 @@ from tqdm import tqdm
 from pprint import pprint
 from osgeo import gdal
 import segmentation_models_pytorch as smp
-from segmentation_models_pytorch.datasets import SimpleOxfordPetDataset
+from segmentation_models_pytorch.datasets import SimpleOxfordPetDataset ##  (?) how to modify this here
 
 # Import helpful functions and classes from pytorch
 import torch
@@ -82,11 +82,11 @@ if __name__ == '__main__':
     # Load model weights into GPU memory
     model.to(device=device)
 
-    # Create dataset and split it into train and val dataset.
+    # Create dataset and split it into train and val dataset. (?? I don't think I need this?)
     if not os.path.exists(cfg['path_data']):
-        SimpleOxfordPetDataset.download(cfg['path_data'])
-    train_set = SimpleOxfordPetDataset(cfg['path_data'], "train")
-    val_set = SimpleOxfordPetDataset(cfg['path_data'], "valid")
+        SharkBody.download(cfg['path_data'])
+    train_set = SharkBody(cfg['path_data'], "train")
+    val_set = SharkBody(cfg['path_data'], "valid")
 
     loader_args = dict(batch_size=cfg['batch_size'],
                        num_workers=cfg['num_workers'],
