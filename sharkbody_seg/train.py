@@ -23,6 +23,8 @@ from torch.utils.data import DataLoader
 from sharkbody_seg.eval.online_eval import online_eval
 from sharkbody_seg.utils.utils import set_all_seeds
 from sharkbody_seg.utils.utils import lookup_torch_dtype
+import wandb
+import random
 
 def get_args():
     parser = argparse.ArgumentParser(description='Train the UNet on images and target masks')
@@ -59,6 +61,9 @@ if __name__ == '__main__':
 
     print('Default model configuration:')
     pprint(cfg)
+
+    # Initialize W&B 
+    wandb.init(project='sharkbody_seg', entity='alexandradigiacomo', config=cfg)
 
     # Optional: Insert code to overwrite config during hyperparameter sweep here
 
@@ -171,9 +176,13 @@ if __name__ == '__main__':
                 epoch_loss += loss.item()
                 pbar.set_postfix(**{'avg loss/img': epoch_loss / float(i+1)})
 
+            # Log the loss to W&B
+            wandb.log({'train_loss': epoch_loss / len(train_loader)})
+
         # Do online evaluation after every epoch
         val_score = online_eval(model, dataloader=val_loader, criterion=criterion, 
                                      device=device, dtype=dtype, cfg=cfg)
+        wandb.log({'val_score': val_score})  # Log validation score
         if cfg['lr_scheduler'] == 'ReduceLROnPlateau':
             scheduler.step(val_score)
 
@@ -184,6 +193,7 @@ if __name__ == '__main__':
         torch.save(state_dict, str(Path(cfg['path_checkpoints']) / checkpoint_filename))
         logging.info(f'Checkpoint {epoch} saved!')
 
-        # Optional: insert code to evaluate the model on predictions over the full-scale tif using multiple metrics and log it to wandb
+        # Log the checkpoint file to W&B
+        wandb.save(str(Path(cfg['path_checkpoints']) / checkpoint_filename))
 
     print("Finished train.py")
