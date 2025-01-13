@@ -12,7 +12,7 @@ from tqdm import tqdm
 from pprint import pprint
 from osgeo import gdal
 import segmentation_models_pytorch as smp
-from sharkbody_seg.dataset import SharkBody # (?) check how this works
+from sharkbody_seg.dataset import SharkBody
 
 # Import helpful functions and classes from pytorch
 import torch
@@ -82,7 +82,7 @@ if __name__ == '__main__':
     # Load model weights into GPU memory
     model.to(device=device)
 
-    # Create dataset and split it into train and val dataset. (?? I don't think I need this?)
+    # Create dataset and split it into train and val dataset
     if not os.path.exists(cfg['path_data']):
         SharkBody.download(cfg['path_data'])
     
@@ -97,8 +97,6 @@ if __name__ == '__main__':
     val_loader = DataLoader(val_set, shuffle=False, **loader_args)
 
     sample = train_set[0]
-
-    # Optional: Insert code for wandb logging here
 
     # Set up the optimizer, the loss, the learning rate scheduler and the loss scaling for AMP
     if cfg['optimizer'] == 'adamW':
@@ -150,7 +148,7 @@ if __name__ == '__main__':
                 inputs = inputs.to(device=device, dtype=dtype, memory_format=torch.channels_last)
                 targets = targets.to(device=device, dtype=dtype)
                 
-                # Todo: define a transform that includes normalization, augmentations, etc.
+                # Todo: define a transform that includes normalization, augmentations, etc. (?) Does this need to be updated
                 inputs = inputs / 255.
                 
                 # Create model predictions
