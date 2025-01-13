@@ -21,7 +21,7 @@ image_size: 224                 # added by AD because image_size was missing in 
 experiment_key: 'demo_run'
 path_data: '/mnt/class_data/group2/alexandradigiacomo/dataset/' # replace this with your data path
 data_root: '/mnt/class_data/group2/alexandradigiacomo/dataset/' # added by AD because data_root was missing from cfg
-path_checkpoints: './runs/unet_smp/demo_run/checkpoints' # Store model checkpoints
+path_checkpoints: '/home/Alexandra/Projects/bodycondition/sharkbody_seg/runs/unet_smp/demo_run/checkpoints' # Store model checkpoints
 
 # training hyperparameters
 epochs: 100
