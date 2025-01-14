@@ -153,9 +153,6 @@ if __name__ == '__main__':
                 inputs = inputs.to(device=device, dtype=dtype, memory_format=torch.channels_last)
                 targets = targets.to(device=device, dtype=dtype)
                 
-                # Todo: define a transform that includes normalization, augmentations, etc. (?) Does this need to be updated
-                inputs = inputs / 255.
-                
                 # Create model predictions
                 pred = model(inputs)
 
@@ -190,10 +187,7 @@ if __name__ == '__main__':
         Path(cfg['path_checkpoints']).mkdir(parents=True, exist_ok=True)
         state_dict = model.state_dict()
         checkpoint_filename = f'checkpoint_epoch{epoch}.pth'
-        torch.save(state_dict, str(Path(cfg['path_checkpoints']) / checkpoint_filename))
+        torch.save(state_dict, str(Path(cfg['path_checkpoints']) / checkpoint_filename)) ## modify here for model testing
         logging.info(f'Checkpoint {epoch} saved!')
-
-        # Log the checkpoint file to W&B
-        wandb.save(str(Path(cfg['path_checkpoints']) / checkpoint_filename))
 
     print("Finished train.py")
