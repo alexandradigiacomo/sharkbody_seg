@@ -63,7 +63,7 @@ if __name__ == '__main__':
     pprint(cfg)
 
     # Initialize W&B 
-    wandb.init(project='sharkbody_seg', entity='alexandradigiacomo', config=cfg)
+    wandb.init(project='sharkbody_seg', entity='alexandradigiacomo-stanford-university', config=cfg)
 
     # Optional: Insert code to overwrite config during hyperparameter sweep here
 
