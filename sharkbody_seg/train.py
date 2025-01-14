@@ -158,6 +158,11 @@ if __name__ == '__main__':
 
                 # Compute loss
                 loss = criterion(pred, targets)
+
+                # Compute IoU
+                intersection = torch.sum(pred * targets)
+                union = torch.sum(pred) + torch.sum(targets) - intersection
+                iou = intersection / union
                 
                 # Reset and scale gradients
                 optimizer.zero_grad(set_to_none=True)
@@ -175,6 +180,8 @@ if __name__ == '__main__':
 
             # Log the loss to W&B
             wandb.log({'train_loss': epoch_loss / len(train_loader)})
+            # Log the IoU
+            wandb.log({'iou':iou})
 
         # Do online evaluation after every epoch
         val_score = online_eval(model, dataloader=val_loader, criterion=criterion, 
