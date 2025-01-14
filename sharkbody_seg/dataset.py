@@ -14,6 +14,7 @@ class SharkBody(Dataset):
 
     def __init__(self, cfg, split='train'): # collect and index dataset inputs/labels
         self.data_root = cfg['data_root'] # root folder
+        self.annotations_root = cfg['annotations_root'] # annotations root folder
         self.split = split # determine split
 
         self.transform = Compose([ # transform: resize/convert to torch tensor and (opt.) augmentation      
