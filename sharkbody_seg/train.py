@@ -160,9 +160,13 @@ if __name__ == '__main__':
                 loss = criterion(pred, targets)
 
                 # Compute IoU
-                intersection = torch.sum(pred * targets)
-                union = torch.sum(pred) + torch.sum(targets) - intersection
-                iou = intersection / union
+                pred_mask = torch.sigmoid(pred) # convert from raw logits to probs
+                pred_mask = (pred_mask > 0.5).float() # convert to binary based on 0.5 thresh
+                
+                intersection = torch.sum(pred_mask * targets)
+                union = torch.sum(pred_mask) + torch.sum(targets) - intersection
+                iou = intersection / (union + 1e-6) 
+                print(f"iou: {iou.item()}") # debugging iou, remove after debug
                 
                 # Reset and scale gradients
                 optimizer.zero_grad(set_to_none=True)
@@ -194,7 +198,7 @@ if __name__ == '__main__':
         Path(cfg['path_checkpoints']).mkdir(parents=True, exist_ok=True)
         state_dict = model.state_dict()
         checkpoint_filename = f'checkpoint_epoch{epoch}.pth'
-        torch.save(state_dict, str(Path(cfg['path_checkpoints']) / checkpoint_filename)) ## modify here for model testing
+        torch.save(state_dict, str(Path(cfg['path_checkpoints']) / checkpoint_filename)) 
         logging.info(f'Checkpoint {epoch} saved!')
 
     print("Finished train.py")
