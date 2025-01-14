@@ -20,7 +20,7 @@ class SharkBody(Dataset):
             Resize((cfg['image_size'], cfg['image_size'])), ToTensor()])
         
         annotations_path = os.path.join( # path to annotations
-            self.data_root, 'annotations', 
+            self.annotations_root,
             'train.json' if self.split == 'train' else 'val.json') # choose one of two splits
 
         self.coco = COCO(annotations_path) 
