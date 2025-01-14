@@ -50,9 +50,6 @@ class SharkBody(Dataset):
         image_path = os.path.join(self.data_root, 'images', image_name) # pull image path
         img = Image.open(image_path).convert('RGB')  # open image
         mask = self.data[idx]['mask'] # pull mask
-
-        print(f"Original Image size: {img.size}")  # Debugging step: print original size
-
         
         # transform: see lines 31ff above where we define our transformations
         img_tensor = self.transform(img)
