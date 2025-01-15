@@ -159,11 +159,13 @@ if __name__ == '__main__':
                 pred = model(inputs)
 
                 # Compute loss
-                loss = criterion(pred, targets)
+                loss = criterion(pred, targets) # check if sigmoid is included in loss (**)
+                pred = torch.sigmoid(pred)>0.5 # parameter to tune; change to parameter in config (**)
 
                 # Compute IoU
                 iou = mean_iou(pred.to(torch.long), targets.to(torch.long), num_classes = 2, input_format = "index")
-                print(f"iou: {iou}") # debugging iou, remove after debug
+                iou_score = iou[1].item() # iou from tensor to scalar
+                print(f"iou: {iou}")
                 
                 # Reset and scale gradients
                 optimizer.zero_grad(set_to_none=True)
@@ -182,7 +184,32 @@ if __name__ == '__main__':
             # Log the loss to W&B
             wandb.log({'train_loss': epoch_loss / len(train_loader)})
             # Log the IoU
-            wandb.log({'iou':iou})
+            wandb.log({'iou_score':iou_score}) # log iou as a tensor
+
+            # Wandb segmentation plots for a random val example in each batch
+            if epoch % 1 == 0:
+                # Select a random sample from the validation dataset
+                random_idx = random.randint(0, len(val_set) - 1)  # Get a random index
+                sample = val_set[random_idx]
+
+                # Prepare inputs 
+                img_display = sample['image'].unsqueeze(0).to(device)  # Add batch dimension
+                mask_display = sample['mask'].squeeze(0).numpy()  # Convert from (1, H, W) to (H, W)
+
+                model.eval()  # Set the model to eval mode
+                with torch.no_grad(): 
+                    pred = model(img_display)
+
+                pred = torch.sigmoid(pred) > 0.5  # sigmoid, 0.5 is hyperparameter
+
+                # convert tensors to np
+                img_display = img_display.squeeze(0).cpu().numpy().transpose(1, 2, 0)  # Convert from (C, H, W) to (H, W, C)
+                pred_display = pred.squeeze(0).cpu().numpy()  # Convert (1, H, W) to (H, W)
+                
+                # Log the image and its corresponding masks
+                wandb.log({'sample': wandb.Image(img_display, masks={'ground_truth': {'mask_data': mask_display,  
+                                'class_ids': [1],},'predicted': {'mask_data': pred_display,  'class_ids': [1]}}, 
+                                caption=f"Epoch {epoch} - Random Sample")})
 
         # Do online evaluation after every epoch
         val_score = online_eval(model, dataloader=val_loader, criterion=criterion, 
