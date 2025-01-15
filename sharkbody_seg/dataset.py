@@ -55,6 +55,6 @@ class SharkBody(Dataset):
         img_tensor = self.transform(img)
         mask_tensor = self.transform(mask)
 
-        sample = dict(image=img_tensor, mask=mask_tensor)
+        sample = dict(image=img_tensor, mask=mask_tensor*255)
 
         return sample
