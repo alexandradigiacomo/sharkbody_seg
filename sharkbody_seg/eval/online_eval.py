@@ -4,6 +4,7 @@ from tqdm import tqdm
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torchmetrics.functional.segmentation import mean_iou
 
 @torch.inference_mode()
 def online_eval(model, dataloader, 
@@ -31,6 +32,8 @@ def online_eval(model, dataloader,
     # generates int between 0 (inclusive) and n_val (exclusive)
     plot_img_idx = torch.randint(0, n_val, (1,)) 
 
+    iou_score_list = [] # initialize list
+
     # iterate over the validation set
     with tqdm(total=n_val, desc='validation.', unit='img', leave=False) as pbar2:
         for i, batch in enumerate(dataloader):
@@ -45,11 +48,17 @@ def online_eval(model, dataloader,
             pred = model(inputs)
 
             loss = criterion(pred, targets) # average loss per img
-
             total_loss += loss * batch_sizes[i] # compute total loss by multiplying with number of images in batch
+
+            pred = torch.sigmoid(pred)>0.5 # parameter to tune; change to parameter in config (**)
         
             pbar2.update(batch_sizes[i])
             pbar2.set_postfix(**{'val loss/img': loss.cpu().numpy() / float(i+1)})
+            
+            # iou calculation, log to weights and biases
+            iou = mean_iou(pred.to(torch.long), targets.to(torch.long), num_classes = 2, input_format = "index")
+            iou_score = iou[1].item() # iou from tensor to scalar
+            iou_score_list.append(iou_score) # add to list for this epoch
 
             # Plot one image in the batch to wandb
             if i == np.floor(plot_img_idx / batch_sizes[0]): # index into batch that contains plot_img_idx
@@ -69,9 +78,15 @@ def online_eval(model, dataloader,
                     wandb_run.log({'inputs('+','.join(in_keys)+'), target-mask, target, pred': 
                                 log_ims_wandb}, commit=False)
 
+    # Accumulated IOU
+    iou_accum = sum(iou_score_list)/len(iou_score_list) # take iou avg for epoch
+     # Log the IoU
+    wandb.log({'iou_accum':iou_accum}) # log iou as a tensor  
+
+    # Compute val score
     val_score = total_loss / n_val
     logging.info('val loss/img: {}'.format(val_score))
-
+ 
     # Log plots to wandb
     if wandb_run is not None:
         import wandb
@@ -92,4 +107,4 @@ def online_eval(model, dataloader,
         }, commit=False)
 
     model.train()
-    return val_score
+    return val_score, iou_accum
