@@ -7,6 +7,7 @@ import os
 import argparse
 import logging
 import yaml
+import numpy as np
 from pathlib import Path
 from tqdm import tqdm
 from pprint import pprint
@@ -19,6 +20,7 @@ import torch
 import torch.nn as nn
 from torch import optim
 from torch.utils.data import DataLoader
+from torchmetrics.functional.segmentation import mean_iou
 
 from sharkbody_seg.eval.online_eval import online_eval
 from sharkbody_seg.utils.utils import set_all_seeds
@@ -160,13 +162,8 @@ if __name__ == '__main__':
                 loss = criterion(pred, targets)
 
                 # Compute IoU
-                pred_mask = torch.sigmoid(pred) # convert from raw logits to probs
-                pred_mask = (pred_mask > 0.5).float() # convert to binary based on 0.5 thresh
-                
-                intersection = torch.sum(pred_mask * targets)
-                union = torch.sum(pred_mask) + torch.sum(targets) - intersection
-                iou = intersection / (union + 1e-6) 
-                print(f"iou: {iou.item()}") # debugging iou, remove after debug
+                iou = mean_iou(pred.to(torch.long), targets.to(torch.long), num_classes = 2, input_format = "index")
+                print(f"iou: {iou}") # debugging iou, remove after debug
                 
                 # Reset and scale gradients
                 optimizer.zero_grad(set_to_none=True)
