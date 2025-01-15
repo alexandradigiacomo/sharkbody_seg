@@ -141,6 +141,7 @@ if __name__ == '__main__':
 
     # Begin training
     for epoch in range(1, cfg['epochs'] + 1):
+        iou_score_list = [] # initialize iou score list
         model.train()
         epoch_loss = 0
         with tqdm(total=len(train_set),
@@ -165,7 +166,7 @@ if __name__ == '__main__':
                 # Compute IoU
                 iou = mean_iou(pred.to(torch.long), targets.to(torch.long), num_classes = 2, input_format = "index")
                 iou_score = iou[1].item() # iou from tensor to scalar
-                print(f"iou: {iou}")
+                iou_score_list.append(iou_score) # add to list for this epoch
                 
                 # Reset and scale gradients
                 optimizer.zero_grad(set_to_none=True)
@@ -180,11 +181,13 @@ if __name__ == '__main__':
                 pbar.update(inputs.shape[0])
                 epoch_loss += loss.item()
                 pbar.set_postfix(**{'avg loss/img': epoch_loss / float(i+1)})
-
+            
             # Log the loss to W&B
             wandb.log({'train_loss': epoch_loss / len(train_loader)})
+            # Accumulated IOU
+            iou_accum = sum(iou_score_list)/len(iou_score_list) # take iou avg for epoch
             # Log the IoU
-            wandb.log({'iou_score':iou_score}) # log iou as a tensor
+            wandb.log({'iou_accum':iou_accum}) # log iou as a tensor  
 
             # Wandb segmentation plots for a random val example in each batch
             if epoch % 1 == 0:
@@ -194,7 +197,6 @@ if __name__ == '__main__':
 
                 # Prepare inputs 
                 img_display = sample['image'].unsqueeze(0).to(device)  # Add batch dimension
-                mask_display = sample['mask'].squeeze(0).numpy()  # Convert from (1, H, W) to (H, W)
 
                 model.eval()  # Set the model to eval mode
                 with torch.no_grad(): 
@@ -202,19 +204,24 @@ if __name__ == '__main__':
 
                 pred = torch.sigmoid(pred) > 0.5  # sigmoid, 0.5 is hyperparameter
 
-                # convert tensors to np
+                # Convert tensors to np
                 img_display = img_display.squeeze(0).cpu().numpy().transpose(1, 2, 0)  # Convert from (C, H, W) to (H, W, C)
-                pred_display = pred.squeeze(0).cpu().numpy()  # Convert (1, H, W) to (H, W)
+                pred_display = pred.squeeze(0).squeeze(0).cpu().numpy()  # Convert from four dimensions to two (H, W)
                 
+                cmap = np.zeros((pred_display.shape[0], pred_display.shape[1], 3), dtype=np.uint8)  # (H, W, 3)
+                cmap[pred_display == 1] = [1, 0, 0]  # Red color for mask
+
+                # Stitch to side by side comparison
+                stitched_image = np.hstack((img_display, cmap))
+
                 # Log the image and its corresponding masks
-                wandb.log({'sample': wandb.Image(img_display, masks={'ground_truth': {'mask_data': mask_display,  
-                                'class_ids': [1],},'predicted': {'mask_data': pred_display,  'class_ids': [1]}}, 
-                                caption=f"Epoch {epoch} - Random Sample")})
+                wandb.log({'sample': wandb.Image(stitched_image, caption=f"Epoch {epoch} - Random Sample")})
 
         # Do online evaluation after every epoch
-        val_score = online_eval(model, dataloader=val_loader, criterion=criterion, 
+        val_score, val_iou_score = online_eval(model, dataloader=val_loader, criterion=criterion, 
                                      device=device, dtype=dtype, cfg=cfg)
-        wandb.log({'val_score': val_score})  # Log validation score
+
+        wandb.log({'val_score': val_score, 'val_iou_score': val_iou_score})  # Log validation score
         if cfg['lr_scheduler'] == 'ReduceLROnPlateau':
             scheduler.step(val_score)
 
