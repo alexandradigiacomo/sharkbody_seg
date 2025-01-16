@@ -187,7 +187,7 @@ if __name__ == '__main__':
             # Accumulated IOU
             iou_accum = sum(iou_score_list)/len(iou_score_list) # take iou avg for epoch
             # Log the IoU
-            wandb.log({'iou_accum':iou_accum}) # log iou as a tensor  
+            wandb.log({'train_iou_score':iou_accum}) # log average iou to wandb  
 
             # Wandb segmentation plots for a random val example in each batch
             if epoch % 1 == 0:
