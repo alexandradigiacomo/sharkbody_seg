@@ -79,9 +79,7 @@ def online_eval(model, dataloader,
                                 log_ims_wandb}, commit=False)
 
     # Accumulated IOU
-    iou_accum = sum(iou_score_list)/len(iou_score_list) # take iou avg for epoch
-     # Log the IoU
-    wandb.log({'iou_accum':iou_accum}) # log iou as a tensor  
+    iou_accum = sum(iou_score_list)/len(iou_score_list) # take iou avg for epoch 
 
     # Compute val score
     val_score = total_loss / n_val
