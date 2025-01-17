@@ -1,95 +1,102 @@
 import os
-import torch
-import segmentation_models_pytorch as smp
-import yaml
 import argparse
-from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
-import matplotlib.pyplot as plt
+import logging
+import torch
+import yaml
 import numpy as np
-from PIL import Image
-import json
-from sharkbody_seg.dataset import SharkBody
+import cv2
+import segmentation_models_pytorch as smp
+from pathlib import Path
 
-# Command line arguments
-def parse_args():
-    parser = argparse.ArgumentParser(description="Model Prediction")
-    parser.add_argument('--config', type=str, required=True, help="Path to the config YAML file")
-    parser.add_argument('--checkpoint', type=str, required=True, help="Path to the model checkpoint")
+from sharkbody_seg.dataset import SharkBody
+from sharkbody_seg.utils.utils import set_all_seeds
+from sharkbody_seg.utils.utils import lookup_torch_dtype
+
+def get_args():
+    parser = argparse.ArgumentParser(description='Predict on images using a trained model')
+    parser.add_argument('--cfg_path', type=str, default='runs/unet_smp/default/config/config.yaml',
+                        help='Path to config yaml')
+    parser.add_argument('--checkpoint', type=str, default=None,
+                        help='Path to the checkpoint file for model weights')
     return parser.parse_args()
 
-# Load the config file
-def load_config(config_path):
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    return config
+def predict(model, dataset, device, output_dir):
+    """Run inference on each image in the dataset and save masks & images"""
+    model.eval()  # set model to eval mode
+    with torch.no_grad(): 
+        for i, sample in enumerate(dataset):
+            image = sample['image'].unsqueeze(0).to(device)  # Send image to device
+            
+            pred = model(image) # predict for the single image
+            pred = torch.sigmoid(pred) > 0.5  # sigmoid, 0.5 is hyperparameter
 
-# Model inference
-def predict(config, checkpoint_path, dataset, device):
-    # Extract values from the config
-    image_size = config['image_size']
-    in_channels = config['in_channels']
-    out_channels = config['out_channels']
-    encoder_name = config['encoder_name']
-    encoder_weights = config['encoder_weights']
+            img_display = image.squeeze(0).cpu().numpy().transpose(1, 2, 0)  # Convert from (C, H, W) to (H, W, C)
+            img_display = (img_display * 255).astype(np.uint8)  # Scale to uint8 [0, 255]
+
+            pred_display = pred.squeeze(0).squeeze(0).cpu().numpy()  # Convert from four dimensions to two (H, W)
+            pred_display = (pred_display * 255).astype(np.uint8)  # convert to uint8 for compatability with cv2
+
+            filename = sample['filename'] # grab the filename 
+
+            img_path = Path(output_dir) / f"img_{filename}.png" # (*** change to filename)
+            pred_path = Path(output_dir) / f"pred_{filename}.png"
+
+            cv2.imwrite(str(img_path), img_display)
+            cv2.imwrite(str(pred_path), pred_display)
+    
+    logging.info(f"Predictions saved to {output_dir}")
+
+if __name__ == '__main__':
+    args = get_args() # read command line args
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s') # init logging
+    cfg = yaml.safe_load(open(args.cfg_path, 'r')) # import cfg 
+    dtype = lookup_torch_dtype(cfg['dtype'])
+
+    # Init cpu or gpu
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    logging.info(f'Using device {device}')
+
+    # Initialize random number generator
+    set_all_seeds(cfg['seed'], device=device.type, 
+                  use_deterministic_algorithms=cfg['use_deterministic_algorithms'],
+                  warn_only=True)
 
     # Load model
-    model = smp.Unet(
-        encoder_name=encoder_name,
-        encoder_weights=encoder_weights,
-        in_channels=in_channels,
-        out_channels=out_channels,
-        activation='sigmoid'
-    )
+    if cfg['model_key'] == 'unet_smp':
+        cfg['model_args'] = {
+            'encoder_name': cfg['encoder_name'],
+            'encoder_weights': cfg['encoder_weights'],  # Pretrained weights here, e.g. "imagenet"
+            'in_channels': cfg['in_channels'],
+            'classes': cfg['out_channels'],
+        }
+        model = smp.Unet(**cfg['model_args'])
+    else:
+        raise NotImplementedError(f'model_key, {cfg["model_key"]}, from config.yaml not implemented')
 
-    # Load model checkpoint
-    model.load_state_dict(torch.load(checkpoint_path, map_location=device, weights_only=True))
-    model.to(device) # load model to correct device
-    model.eval()
+    model = model.to(device=device)
 
-# Prediction setup
-    predictions = []
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+    # Optionally load model weights from a checkpoint if provided via command-line
+    if args.checkpoint:
+        checkpoint_path = Path(args.checkpoint)
+        if checkpoint_path.exists():
+            logging.info(f"Loading checkpoint from {checkpoint_path}")
+            checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
+            model.load_state_dict(checkpoint)
+        else:
+            logging.error(f"Checkpoint file not found at {checkpoint_path}. Exiting...")
+            exit(1)
+    else:
+        logging.info("No checkpoint provided. Initializing model with pretrained encoder weights.")
 
-    # Run predictions on validation set
-    with torch.no_grad():
-        for idx, sample in enumerate(dataloader):
-            img = sample['image'].to(device)
-            output = model(img)
-            output = torch.sigmoid(output).cpu().numpy()
-            mask = (output > 0.5).astype(np.uint8)  # Convert to binary mask
+    # Load the dataset for prediction
+    if not os.path.exists(cfg['path_data']):
+        SharkBody.download(cfg['path_data'])
+    
+    val_set = SharkBody(cfg, split="val") 
+    output_dir = Path(cfg['path_checkpoints']) / 'predictions'
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-            # Access the filename 
-            filename = dataset.data[idx]['file_name']
+    # Run the predictions
+    predict(model, val_set, device, output_dir)
 
-            # Append the result
-            predictions.append((filename, mask.squeeze()))
-
-    return predictions
-
-# Save the predictions
-def save_predictions(predictions, save_path):
-    predictions_dir = os.path.join(os.path.dirname(os.path.dirname(save_path)), 'predictions')
-    os.makedirs(predictions_dir, exist_ok=True) # create dir if doesn't exist
-    for filename, mask in predictions:
-        mask_image = Image.fromarray(mask) # in 0,1 format
-        mask_image.save(os.path.join(predictions_dir, f"pred_{filename}"))
-
-# Main
-if __name__ == '__main__':
-    args = parse_args()
-    config = load_config(args.config)
-    checkpoint_path = args.checkpoint
-
-    # Extract val data from SharkBody
-    dataset = SharkBody(cfg=config, split='val') 
-
-    # Check GPU avail and set device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # Run prediction
-    predictions = predict(config, checkpoint_path, dataset, device)
-
-    # Save predictions
-    save_predictions(predictions, checkpoint_path)  # Save masks to 'predictions' folder
-    print("Predictions saved successfully")
+    logging.info("Finished predictions.")
