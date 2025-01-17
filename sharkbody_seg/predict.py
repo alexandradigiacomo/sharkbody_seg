@@ -33,13 +33,13 @@ def predict(model, dataset, device, output_dir):
             img_display = image.squeeze(0).cpu().numpy().transpose(1, 2, 0)  # Convert from (C, H, W) to (H, W, C)
             img_display = (img_display * 255).astype(np.uint8)  # Scale to uint8 [0, 255]
 
-            pred_display = pred.squeeze(0).squeeze(0).cpu().numpy()  # Convert from four dimensions to two (H, W)
+            pred_display = pred.squeeze(0).squeeze(0).cpu().numpy()  # convert from four dimensions to two (H, W)
             pred_display = (pred_display * 255).astype(np.uint8)  # convert to uint8 for compatability with cv2
 
-            filename = sample['filename'] # grab the filename 
+            filename_root, _ = os.path.splitext(sample['filename'])  # grab filename w/o extension
 
-            img_path = Path(output_dir) / f"img_{filename}.png" # (*** change to filename)
-            pred_path = Path(output_dir) / f"pred_{filename}.png"
+            img_path = Path(output_dir) / f"img_{filename_root}.png" # (*** change to filename)
+            pred_path = Path(output_dir) / f"pred_{filename_root}.png"
 
             cv2.imwrite(str(img_path), img_display)
             cv2.imwrite(str(pred_path), pred_display)
