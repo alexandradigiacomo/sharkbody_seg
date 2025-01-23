@@ -131,8 +131,8 @@ def get_mask_dims(annotations_path):
     df = pd.DataFrame(mask_data)
     return df
 
-def process_biometrics(root_predictions, pred_files):
-   """run predictions through to extract morphometric variables"""
+def process_biometrics(root_predictions, pred_files): 
+    """add morphometric variables"""
     data = []  # store rows for df
 
     for file in pred_files:
