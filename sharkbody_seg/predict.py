@@ -81,7 +81,7 @@ if __name__ == '__main__':
         if checkpoint_path.exists():
             logging.info(f"Loading checkpoint from {checkpoint_path}")
             checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
-            model.load_state_dict(checkpoint)
+            model.load_state_dict(checkpoint['state_dict'])
         else:
             logging.error(f"Checkpoint file not found at {checkpoint_path}. Exiting...")
             exit(1)
@@ -92,7 +92,7 @@ if __name__ == '__main__':
     if not os.path.exists(cfg['path_data']):
         SharkBody.download(cfg['path_data'])
     
-    val_set = SharkBody(cfg, split="val") 
+    val_set = SharkBody(cfg, split="train") #### make sure you change this!!!
     output_dir = Path(cfg['path_checkpoints']) / 'predictions'
     output_dir.mkdir(parents=True, exist_ok=True)
 
