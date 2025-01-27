@@ -2,7 +2,6 @@
     Training script. Here, we load the training and validation datasets (and
     data loaders) and the model and train and validate the model accordingly.
 '''
-# Best practice is to import all packages at the beginning of the code.
 import os
 import argparse
 import logging
@@ -139,7 +138,10 @@ if __name__ == '__main__':
     else:
         raise NotImplementedError(f'loss_function, {cfg["loss_function"]}, from config.yaml not implemented')
 
-    # Begin training
+    best_val_iou_score = 0.0 # initialize to a small number
+    best_epoch = 0
+    best_checkpoint = None
+    
     for epoch in range(1, cfg['epochs'] + 1):
         iou_score_list = [] # initialize iou score list
         model.train()
@@ -225,11 +227,30 @@ if __name__ == '__main__':
         if cfg['lr_scheduler'] == 'ReduceLROnPlateau':
             scheduler.step(val_score)
 
+        # Track and update the best IoU score
+        if val_iou_score > best_val_iou_score:
+            best_iou_score = val_iou_score
+            best_epoch = epoch
+            best_checkpoint = model.state_dict()
+            logging.info(f"New best IoU: {best_iou_score}")
+
         # Save model
         Path(cfg['path_checkpoints']).mkdir(parents=True, exist_ok=True)
         state_dict = model.state_dict()
         checkpoint_filename = f'checkpoint_epoch{epoch}.pth'
-        torch.save(state_dict, str(Path(cfg['path_checkpoints']) / checkpoint_filename)) 
-        logging.info(f'Checkpoint {epoch} saved!')
+
+        # Export checkpoint if multiple of 10 or best
+        if epoch % 10 == 0:
+            torch.save(state_dict, str(Path(cfg['path_checkpoints']) / checkpoint_filename)) 
+            logging.info(f'Checkpoint {epoch} saved!')
+
+    # After all epochs, save best checkpoint
+    print(f'best checkpoint {best_checkpoint} saved!')
+    if best_checkpoint is not None:
+        checkpoint_filename = f'bestcheckpoint_epoch{best_epoch}.pth'
+        torch.save({
+            'state_dict': best_checkpoint,
+            'best_iou_score': best_iou_score,
+            'epoch': best_epoch}, str(Path(cfg['path_checkpoints']) / checkpoint_filename))
 
     print("Finished train.py")
