@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -20,6 +21,7 @@ def mask_area(mask):
     """input mask, get area (pixels)"""
     area = np.sum(mask)
     return area
+
 
 def get_cross_sectional_lengths(mask):
     """input mask, get cross sectional lengths down the body,
@@ -56,24 +58,35 @@ def get_cross_sectional_lengths(mask):
     return cross_sections, directions
 
 def find_intersection(mask, start_point, direction, max_distance=50):
-    """finds intersection point with the mask"""
-    for dist in np.linspace(1, max_distance, num=max_distance):
+    """ Finds intersection point with the mask along a direction from a start point """
+    
+    if np.isnan(start_point[0]) or np.isnan(start_point[1]):
+        return None  # Skip this calculation if the start point is NaN
 
+    if np.isnan(direction[0]) or np.isnan(direction[1]):
+        return None  # Skip this calculation if the direction is NaN
+
+    if np.linalg.norm(direction) == 0:
+        return None 
+    
+    for dist in np.linspace(1, max_distance, num=max_distance):
         x_offset = int(round(start_point[0] + dist * direction[0]))
         y_offset = int(round(start_point[1] + dist * direction[1]))
-        
         if 0 <= x_offset < mask.shape[0] and 0 <= y_offset < mask.shape[1]:
-            if mask[x_offset, y_offset] == 0:  # Transition from 1 to 0; ret intersection
+            if mask[x_offset, y_offset] == 0:  # Transition from 1 to 0, intersection found
                 return (x_offset, y_offset)
     
-    return None  
+    return None
 
-def get_cross_sectional_points(mask, smooth_window=15):
+
+def get_cross_sectional_points(mask, smooth_window=10):
     """get the two cross sectional points that intersect the mask 
-    for easy computation and storing"""
+    for easy computation and storing. 
+    included functionality for different sized masks - proportional smoothing window""" 
     medial_line = np.column_stack(np.where(skeletonize(mask)))
     total_length = len(medial_line)
     cross_section_points = []
+    smooth_window = round((total_length)*(smooth_window/100)) # proportional smoothing window
 
     for i in range(0, total_length, max(1, total_length // 100)): # 1% interval traversal
         point = medial_line[i]
@@ -93,20 +106,21 @@ def get_cross_sectional_points(mask, smooth_window=15):
     return cross_section_points
 
 def get_widest_cross_section(cross_section_points):
-    """get the widest cross section"""
-    max_distance = 0  # Initialize max distance
-    widest_pair = None  # Initialize the pair with the widest cross-section
-
+    """Get the three widest cross sections (of 1%s) and their average distance."""
+    distances = []
+    
     for forward, backward in cross_section_points:
-        # Calculate the Euclidean distance between the forward and backward points
         distance = np.linalg.norm(np.array(forward) - np.array(backward))
+        distances.append((distance, (forward, backward)))
 
-        # Update if the current distance is greater than the max distance
-        if distance > max_distance:
-            max_distance = distance
-            widest_pair = (forward, backward)
+    distances.sort(reverse=True, key=lambda x: x[0])
+    top_three = distances[:3] # top three widths
+    top_three_pairs = [pair for _, pair in top_three]
+    top_three_distances = [distance for distance, _ in top_three]
+    average_distance = np.mean(top_three_distances)
+    
+    return top_three_pairs, average_distance
 
-    return widest_pair, max_distance
 
 def get_mask_dims(annotations_path):
     """input annotations, get the bounding box
@@ -131,33 +145,99 @@ def get_mask_dims(annotations_path):
     df = pd.DataFrame(mask_data)
     return df
 
+###
+def process_biometrics2(mask_list): 
+    """takes in existing masks (annotations) and performs computations"""
+    data = []  # store rows for df
+    for mask in mask_list:
+        mask = np.array(mask)
+        skeleton_TL = skeleton_length(mask) # extract medial tl
+        body_area = mask_area(mask) # extract body area
+        cross_sectional_points = get_cross_sectional_points(mask) # extract cx points
+        body_span = get_widest_cross_section(cross_sectional_points)[1] # extract max span
+        image_name = file.replace('pred_', '').replace('.png', '.JPG') # revert image name
+        data.append((image_name, skeleton_TL, body_area, body_span)) # append tuple 
+
+    df = pd.DataFrame(data, columns=['filename', 'skeleton_TL', 'body_area', 'body_span']) # construct df
+        
+    return(df)
+
+
 def process_biometrics(root_predictions, pred_files): 
     """add morphometric variables"""
     data = []  # store rows for df
-
     for file in pred_files:
         mask_path = os.path.join(root_predictions, file) # full path 
         mask = Image.open(mask_path)
         mask = np.array(mask)
 
         skeleton_TL = skeleton_length(mask) # extract medial tl
-        skeleton_TL_transf = skeleton_TL * (crop_size/mask_size)
         body_area = mask_area(mask) # extract body area
         cross_sectional_points = get_cross_sectional_points(mask) # extract cx points
         body_span = get_widest_cross_section(cross_sectional_points)[1] # extract max span
-        body_span_transf = body_span * (crop_size/mask_size) # transf based on crop
         image_name = file.replace('pred_', '').replace('.png', '.JPG') # revert image name
-        data.append((image_name, skeleton_TL, body_area, body_span, skeleton_TL_transf, body_span_transf)) # append tuple 
-    
-    df = pd.DataFrame(data, columns=['filename', 'skeleton_TL', 'body_area', 
-                                     'body_span', 'TL_pixels_skeleton_transf', 'body_span_transf']) # construct df
+        data.append((image_name, skeleton_TL, body_area, body_span)) # append tuple 
+
+    df = pd.DataFrame(data, columns=['filename', 'skeleton_TL', 'body_area', 'body_span']) # construct df
         
     return(df)
+
+def reconstruct_pixels_from_crop(df, crop_size, img_size, use_custom_crop):
+    pixel_transf_factors = []
+    for _, row in df.iterrows():
+        relative_altitude = row['RelativeAltitude_x']  # change as needed
+        img_width = row['ImageWidth_x']  # change as needed
+        img_height = row['ImageHeight_x'] # change as needed
+
+        if use_custom_crop:
+            crop_size = compute_custom_crop_size(relative_altitude, img_width) # compute custom
+        else:
+            crop_size = crop_size # pull input
+
+        if crop_size == 0: #if no crop - need to pull original image size
+            scale_width = img_width/img_size
+            scale_height = img_height/img_size
+            pixel_transf_factor = (scale_width+scale_height)/2 # applying average h/w transf - this is not comprehensive!
+
+        else: 
+            img_size = img_size # pull input
+            pixel_transf_factor = crop_size / img_size
+            
+        
+        pixel_transf_factors.append(pixel_transf_factor)
+
+    df['pixel_transf_factor'] = pixel_transf_factors
+
+    return df
+
+def compute_custom_crop_size(relative_altitude, img_width):
+    """returns the custom crop size associated with the image
+    ***you must change this here if you change it in the dataloader***
+    """
+    crop_size = 0 # initialize
+    if 0 <= relative_altitude <= 30: # Low altitudes
+        if img_width <= 3000: crop_size = 672
+        elif 3000 < img_width <= 4000: crop_size = 672
+        else: crop_size = 896 # img_width > 4000
+    
+    elif 30 < relative_altitude <= 50: # Medium altitudes
+        if img_width <= 3000: crop_size = 448
+        elif 3000 < img_width <= 4000: crop_size = 448
+        else: crop_size = 672 # img_width > 4000
+    
+    elif 50 < relative_altitude <= 100: # High altitudes
+        if img_width <= 3000: crop_size = 448
+        elif 3000 < img_width <= 4000: crop_size = 448
+        else: crop_size = 672 # img_width > 4000
+        
+    return crop_size
 
 def photogrammetric_conversion(df):
     """converts pixels to cm using photogrammetry"""
     gsd =  df['GSD_cm']
     flight_transf = df['Flight_Transformation'] # flight transf
+    df['TL_pixels_skeleton_transf'] = df['skeleton_TL']*df['pixel_transf_factor']
+    df['body_span_transf'] = df['body_span']*df['pixel_transf_factor']
 
     skel_pixt = df['TL_pixels_skeleton_transf'] # medial line (pix)
     body_span = df['body_span_transf']
@@ -185,7 +265,7 @@ def plot_widest_cross_section(mask, cross_section_points):
     widest_pair, max_distance = get_widest_cross_section(cross_section_points)
 
     # Extract forward and backward points
-    forward, backward = widest_pair
+    forward, backward = widest_pair[1]
 
     # Plot the mask
     plt.imshow(mask, cmap='gray')
@@ -218,6 +298,5 @@ def plot_mask_with_skeleton_and_cross_section(mask, cross_section_points):
     ax.scatter([forward[1], backward[1]], [forward[0], backward[0]], color='red', s=20, zorder=5)  # Bigger cyan markers
     ax.set_title('Mask with Skeleton and Widest Cross-Section', color='white')  # Title in white for visibility
     ax.axis('off')  # Hide axis
-    plt.show()
 
-plot_mask_with_skeleton_and_cross_section(mask, cross_section_points)
+    plt.show()
