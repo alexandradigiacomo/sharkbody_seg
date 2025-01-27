@@ -1,0 +1,45 @@
+{
+  "os": "Linux-6.8.0-50-generic-x86_64-with-glibc2.35",
+  "python": "CPython 3.12.8",
+  "startedAt": "2025-01-13T23:10:34.867677Z",
+  "args": [
+    "--cfg_path",
+    "/home/Alexandra/Projects/bodycondition/sharkbody_seg/runs/unet_smp/demo_run/config/config.yaml"
+  ],
+  "program": "/home/Alexandra/Projects/bodycondition/sharkbody_seg/sharkbody_seg/train.py",
+  "codePath": "sharkbody_seg/train.py",
+  "git": {
+    "remote": "git@github.com:alexandradigiacomo/sharkbody_seg.git",
+    "commit": "7daa9c0947a2479b677702e1244034538514fbee"
+  },
+  "email": "alexandra.digiacomo@stanford.edu",
+  "root": "/home/Alexandra/Projects/bodycondition/sharkbody_seg/runs/unet_smp/demo_run/config",
+  "host": "cv4ecology-workshop-student0",
+  "executable": "/home/Alexandra/miniconda3/envs/shark_env/bin/python",
+  "cpu_count": 32,
+  "cpu_count_logical": 32,
+  "gpu": "NVIDIA A100-SXM4-40GB",
+  "gpu_count": 1,
+  "disk": {
+    "/": {
+      "total": "62241562624",
+      "used": "47892176896"
+    }
+  },
+  "memory": {
+    "total": "123628265472"
+  },
+  "cpu": {
+    "count": 32,
+    "countLogical": 32
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA A100-SXM4-40GB",
+      "memoryTotal": "42949672960",
+      "cudaCores": 6912,
+      "architecture": "Ampere"
+    }
+  ],
+  "cudaVersion": "12.2"
+}

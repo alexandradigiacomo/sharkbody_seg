@@ -31,6 +31,9 @@ optimizer: 'adamW' # Optimization algorithm
 learning_rate: 0.0001
 weight_decay: 0.
 loss_function: 'bcewithlogits' # For binary image segmentation
+use_custom_crop: False
+crop_size: null
+is_centered: False
 
 # Step learning rate scheduler 
 lr_scheduler: 'ReduceLROnPlateau'
