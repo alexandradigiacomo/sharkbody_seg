@@ -29,8 +29,9 @@ def sharkBodyCrop(image, mask, crop_size=None, is_centered=True):
     mask_np = np.array(mask) # confirm mask is np array
     shark_pixels = np.argwhere(mask_np == 1) # get all pixels of mask
 
-    if is_centered is True:
-        center_y, center_x = np.mean(shark_pixels, axis=0).astype(int)  # mean y, mean x (center pixel)
+    if is_centered: # pull in annotated center point
+        if center_y is None or center_x is None:
+            raise ValueError("Center coordinates must be provided when is_centered=True.")
         c_y, c_x = center_y, center_x # center coordinates of crop
 
     if is_centered is False: 
@@ -109,8 +110,15 @@ class SharkBody(Dataset):
         self.data = [] # for storing masks
         self.annotation_ids = self.coco.getAnnIds(catIds = [1])
         self.annotations = self.coco.loadAnns(self.annotation_ids)
+
         # load metadata and map altitude to image id
         self.image_metadata = {img['id']: img['relative_altitude'] for img in self.coco.loadImgs(self.coco.getImgIds())}
+
+        # load shark center points
+        centerpoints_csv = os.path.join(self.annotations_root, 'centerpoints.csv')
+        self.centerpoints = pd.read_csv(centerpoints_csv)  # make dataframe self attribute
+        self.center_dict = {row['filename']: (row['center_y'], row['center_x']) for _, row in self.centerpoints.iterrows()} # make dict
+
 
         for ann in self.annotations: # loop through annotations and store
             image_id = ann['image_id']
@@ -135,9 +143,13 @@ class SharkBody(Dataset):
         image_path = os.path.join(self.data_root, 'images', image_name) # pull image path
         img = Image.open(image_path).convert('RGB')  # open image
         mask = self.data[idx]['mask'] # pull mask
-        is_centered = self.cfg['is_centered'] # centered pixel
-
+        is_centered = self.cfg['is_centered'] # is the mask centered
+        if is_centered: # get center coords from csv
+            center_y, center_x = self.center_dict.get(image_name, (None, None))
+            if center_y is None or center_x is None:
+                raise ValueError(f"Center coordinates for {image_name} not found in centerpoints.csv")
         img_width, img_height = img.size # pull size
+
         # cropping
         if self.cfg.get('use_custom_crop', False):  # Check if 'use_custom_crop' is True
             crop_size = compute_custom_crop_size(relative_altitude, img_width)  # Use custom crop size
