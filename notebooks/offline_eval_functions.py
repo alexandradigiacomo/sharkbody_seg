@@ -7,12 +7,82 @@ from PIL import Image
 from skimage.morphology import skeletonize
 from pycocotools.coco import COCO
 
+import numpy as np
+import cv2
+import matplotlib.pyplot as plt
+
+def connect_clean_mask(mask, buffer_radius=10):
+    """
+    Connect the tails to the main body and clean out noise (outside of 10px buffer).
+
+    Parameters:
+    - mask (np.array): Input binary mask (2D NumPy array).
+    - buffer_radius (int): The radius of the buffer around the main mask to include secondary masks.
+
+    Returns:
+    - connected_mask (np.array): The mask with secondary masks connected to the main mask.
+    """
+    # identify main mask (shark)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    largest_contour = max(contours, key=cv2.contourArea)
+    main_mask = np.zeros_like(mask)
+    cv2.drawContours(main_mask, [largest_contour], -1, 255, thickness=cv2.FILLED)
+
+    # create buffer on shark body
+    buffer_mask = cv2.dilate(main_mask, np.ones((buffer_radius, buffer_radius), np.uint8))
+
+    # identify secondary masks that intersect buffer zone (tails)
+    secondary_masks = []
+    for contour in contours:
+        if contour is not largest_contour:  # Skip the largest contour (main mask)
+            sec_mask = np.zeros_like(mask)
+            cv2.drawContours(sec_mask, [contour], -1, 255, thickness=cv2.FILLED)
+            intersection = cv2.bitwise_and(sec_mask, buffer_mask) # check for intersection
+            if np.any(intersection == 255):  # if intersection, preserve
+                secondary_masks.append(sec_mask)
+
+    # find closest points in body and tail masks
+    def connect_masks_by_pixel(main_mask, sec_mask):
+        main_contours, _ = cv2.findContours(main_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        sec_contours, _ = cv2.findContours(sec_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        main_contour = max(main_contours, key=cv2.contourArea)
+        sec_contour = max(sec_contours, key=cv2.contourArea)
+
+        min_distance = float('inf')
+        point_main, point_sec = None, None
+        for pt1 in main_contour:
+            for pt2 in sec_contour:
+                distance = np.linalg.norm(pt1 - pt2)
+                if distance < min_distance:
+                    min_distance, point_main, point_sec = distance, pt1[0], pt2[0]
+
+        return point_main, point_sec
+
+    # draw one-pixel line between points
+    def draw_connection_line(image, point1, point2):
+        cv2.line(image, tuple(point1), tuple(point2), (255), thickness=1)
+
+    # combine masks with connection line
+    connected_mask = np.copy(main_mask) 
+    for sec_mask in secondary_masks:
+        connected_mask = cv2.bitwise_or(connected_mask, sec_mask)
+
+    # draw connection line 
+    for sec_mask in secondary_masks:
+        point_main, point_sec = connect_masks_by_pixel(main_mask, sec_mask)
+        if point_main is not None and point_sec is not None:
+            draw_connection_line(connected_mask, point_main, point_sec)
+
+    return connected_mask
+
 def skeleton(mask):
     """input mask, get skeleton"""
+    mask = np.array(mask)
     skeleton = skeletonize(mask)
     return skeleton
     
-def skeleton_length(mask):
+def skeleton_length(mask): ### you're going to have to work on this here
     """input mask, get skeleton length in pixels"""
     skeleton_length = np.sum(skeletonize(mask))
     return skeleton_length
@@ -22,11 +92,10 @@ def mask_area(mask):
     area = np.sum(mask)
     return area
 
-
 def get_cross_sectional_lengths(mask):
     """input mask, get cross sectional lengths down the body,
     in 1% increments, starting at pixel 20/ending at pixel -20"""
-    medial_line = np.column_stack(np.where(skeletonize(mask))) # extract medial line
+    medial_line = np.column_stack(np.where(skeleton(mask))) # extract medial line
 
     directions = []
     for i in range(1, len(medial_line) - 1):
@@ -79,11 +148,11 @@ def find_intersection(mask, start_point, direction, max_distance=50):
     return None
 
 
-def get_cross_sectional_points(mask, smooth_window=10):
+def get_cross_sectional_points(mask, smooth_window=20):
     """get the two cross sectional points that intersect the mask 
     for easy computation and storing. 
     included functionality for different sized masks - proportional smoothing window""" 
-    medial_line = np.column_stack(np.where(skeletonize(mask)))
+    medial_line = np.column_stack(np.where(skeleton(mask)))
     total_length = len(medial_line)
     cross_section_points = []
     smooth_window = round((total_length)*(smooth_window/100)) # proportional smoothing window
@@ -170,7 +239,7 @@ def process_biometrics(root_predictions, pred_files):
         mask_path = os.path.join(root_predictions, file) # full path 
         mask = Image.open(mask_path)
         mask = np.array(mask)
-
+        mask = connect_clean_mask(mask) # connect tails, clean out artifacts
         skeleton_TL = skeleton_length(mask) # extract medial tl
         body_area = mask_area(mask) # extract body area
         cross_sectional_points = get_cross_sectional_points(mask) # extract cx points
@@ -277,26 +346,65 @@ def plot_widest_cross_section(mask, cross_section_points):
 
     # Mark the points
     plt.scatter([forward[1], backward[1]], [forward[0], backward[0]], color='blue', zorder=5)
-
-    # Show the plot
     plt.show()
 
-def plot_mask_with_skeleton_and_cross_section(mask, cross_section_points):
+def plot_three_widest_cross_sections(mask, cross_section_points):####
+    """plot top three widest cross sectons along the body"""
+    # Find the top three widest cross section
+    widest_pairs, max_distances = get_widest_cross_section(cross_section_points)
+
+    # Plot the mask
+    plt.imshow(mask, cmap='gray')
+    plt.title('Widest Cross Section on Mask')
+    plt.axis('off')
+
+    # Extract forward and backward points
+    for pair in widest_pairs:
+        forward, backward = pair[0], pair[1]
+        plt.plot([forward[1], backward[1]], [forward[0], backward[0]], color='red', linewidth=2, linestyle='--')
+        plt.scatter([forward[1], backward[1]], [forward[0], backward[0]], color='blue', zorder=5)
+
+    plt.show()
+
+def plot_mask_with_skeleton_and_cross_sections(img, mask):
     """plot the mask with both the skeleton and the cross sections overlaid"""
-    skel_plot = skeletonize(mask)
+    mask = connect_clean_mask(mask) # connect tails, clean out artifacts
+    
+    #skeleton
+    skel_plot = skeleton(mask)
     skeleton_coords = np.column_stack(np.where(skel_plot == 1))  # Get (y, x) coordinates of skeleton
-    widest_pair, max_distance = get_widest_cross_section(cross_section_points)
-    forward, backward = widest_pair
-    fig, ax = plt.subplots()
+
+    #widths
+    cross_section_points = get_cross_sectional_points(mask, smooth_window=20)
+    widest_pairs, max_distances = get_widest_cross_section(cross_section_points)
+
+    # plotting two panels side by side
+    fig, axes = plt.subplots(1, 2, figsize=(12, 6))  # 1 row, 2 columns
     fig.patch.set_facecolor('black')  # Set the entire figure background to black
-    ax.set_facecolor('black')  # Set the background of the axes to black
-    ax.imshow(mask, cmap='gray', vmin=0, vmax=255, alpha=0.5)
+
+    # plot mask and morphometrics
+    ax1 = axes[0]
+    ax1.set_facecolor('black')  # Set the background of the axes to black
+    ax1.imshow(mask, cmap='gray', vmin=0, vmax=255, alpha=0.5)
 
     for y, x in skeleton_coords:
-        ax.plot(x, y, 'ro', markersize=1, alpha=0.8)  # Plot each skeleton point as a red dot
-    ax.plot([forward[1], backward[1]], [forward[0], backward[0]], color='red', linewidth=2)  # Make it more bold
-    ax.scatter([forward[1], backward[1]], [forward[0], backward[0]], color='red', s=20, zorder=5)  # Bigger cyan markers
-    ax.set_title('Mask with Skeleton and Widest Cross-Section', color='white')  # Title in white for visibility
-    ax.axis('off')  # Hide axis
+        ax1.plot(x, y, 'ro', markersize=1, alpha=0.8)  # Plot each skeleton point as a red dot
 
-    plt.show()
+    for pair in widest_pairs:
+        forward, backward = pair[0], pair[1]
+        ax1.plot([forward[1], backward[1]], [forward[0], backward[0]], color='red', linewidth=2, linestyle='--')
+        ax1.scatter([forward[1], backward[1]], [forward[0], backward[0]], color='blue', zorder=5)
+
+    ax1.set_title('Morphometrics Mask', color='white')  # Title in white for visibility
+    ax1.axis('off')  # Hide axis
+
+    # plot original image
+    ax2 = axes[1]
+    ax2.set_facecolor('black') 
+    ax2.imshow(img, cmap='gray', vmin=0, vmax=255)
+    
+    ax2.set_title('Original Image', color='white')  # title for the original image
+    ax2.axis('off')  # hide axis
+    
+    plt.tight_layout()
+    return fig # return the plot so you can use it
