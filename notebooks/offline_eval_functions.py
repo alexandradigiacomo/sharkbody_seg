@@ -76,7 +76,116 @@ def connect_clean_mask(mask, buffer_radius=10):
 
     return connected_mask
 
-def skeleton(mask):
+
+from skan import summarize, Skeleton
+from skan.csr import skeleton_to_csgraph
+from collections import deque
+
+def compute_extended_path(skeleton, mask, num_points_src=5, num_points_dst=5):
+    """
+    Computes the extended path of a skeleton (line) to the mask edges from both the source and destination coordinates.
+    Args:
+    - skeleton: The skeletonized mask (binary).
+    - mask: The original binary mask.
+    - num_points_src: Number of points leading up to the source coordinates to calculate direction.
+    - num_points_dst: Number of points leading up to the destination coordinates to calculate direction.
+    Returns:
+    - src_coords: Source coordinates of the longest branch.
+    - dst_coords: Destination coordinates of the longest branch.
+    - shortest_path: The shortest path between the source and destination coordinates.
+    - extended_path: List of extended points that forms the entire path.
+    """
+    def calculate_direction(points, reverse=False):
+        if reverse:
+            points = points[::-1]  # Reverse the points for src_coords to point towards
+        directions = np.diff(points, axis=0)  # Difference between consecutive points
+        avg_direction = np.mean(directions, axis=0)
+        norm = np.linalg.norm(avg_direction)
+        if norm == 0:  # Avoid division by zero if points are identical
+            return np.array([0, 0])
+        return avg_direction / norm
+
+    def extend_line(point, direction, mask):
+        extended_points = []
+        current_point = np.array(point, dtype=np.float64)
+        direction = np.array(direction, dtype=np.float64)
+        while True:
+            current_point += direction
+            current_point_int = np.round(current_point).astype(int)
+            if current_point_int[0] < 0 or current_point_int[1] < 0 or current_point_int[0] >= mask.shape[0] or current_point_int[1] >= mask.shape[1]:
+                break
+            extended_points.append(tuple(current_point_int))
+            if mask[current_point_int[0], current_point_int[1]] == 0:
+                break
+        return extended_points
+
+    def get_neighbors(point, coordinates):
+        neighbors = []
+        for coord in coordinates:
+            if np.abs(coord[0] - point[0]) <= 1 and np.abs(coord[1] - point[1]) <= 1 and not np.array_equal(coord, point):
+                neighbors.append(coord)
+        return neighbors
+
+    def bfs_shortest_path(src, dst, coordinates):
+        queue = deque([[src]])
+        visited = set([tuple(src)])
+        while queue:
+            path = queue.popleft()
+            current_point = path[-1]
+            if np.array_equal(current_point, dst):
+                return path
+            for neighbor in get_neighbors(current_point, coordinates):
+                if tuple(neighbor) not in visited:
+                    visited.add(tuple(neighbor))
+                    queue.append(path + [neighbor])
+        return None
+
+    coordinates = np.argwhere(skeleton)
+    
+    # Summarize the skeleton data and get the longest branch
+    branch_data = summarize(Skeleton(skeleton), separator="_")
+    longest_branch_idx = branch_data['euclidean_distance'].idxmax()
+    longest_branch_data = branch_data.iloc[longest_branch_idx]
+    
+    src_coords = longest_branch_data[['image_coord_src_0', 'image_coord_src_1']].values.flatten()
+    dst_coords = longest_branch_data[['image_coord_dst_0', 'image_coord_dst_1']].values.flatten()
+    
+    shortest_path = bfs_shortest_path(src_coords, dst_coords, coordinates)
+    
+    # Get direction towards src_coords and dst_coords
+    src_points = np.array(shortest_path[:num_points_src])
+    direction_from_src = calculate_direction(src_points, reverse=True)
+    dst_points = np.array(shortest_path[-num_points_dst:])
+    direction_from_dst = calculate_direction(dst_points, reverse=False)
+    
+    # Extend the path
+    extended_src_points = extend_line(src_coords, direction_from_src, mask)
+    extended_dst_points = extend_line(dst_coords, direction_from_dst, mask)
+    
+    # Combine extended points with the original shortest path
+    extended_path = []
+    if extended_src_points:
+        extended_path.extend(extended_src_points[::-1])
+    extended_path.extend(shortest_path)
+    if extended_dst_points:
+        extended_path.extend(extended_dst_points)
+
+    return np.array(src_coords), np.array(dst_coords), np.array(shortest_path), np.array(extended_path)
+
+def compute_extended_path_length(extended_path):
+    """
+    Computes the length of the extended medial line. 
+    Args: extended_path as exported from compute_extended_path
+    Returns: length (pixels) 
+    """
+    length = 0.0
+    for i in range(1, len(extended_path)):
+        dist = np.linalg.norm(extended_path[i] - extended_path[i - 1])
+        length += dist
+    
+    return length
+
+def create_skeleton(mask):
     """input mask, get skeleton"""
     mask = np.array(mask)
     skeleton = skeletonize(mask)
@@ -95,7 +204,7 @@ def mask_area(mask):
 def get_cross_sectional_lengths(mask):
     """input mask, get cross sectional lengths down the body,
     in 1% increments, starting at pixel 20/ending at pixel -20"""
-    medial_line = np.column_stack(np.where(skeleton(mask))) # extract medial line
+    medial_line = np.column_stack(np.where(skeletonize(mask))) # extract medial line
 
     directions = []
     for i in range(1, len(medial_line) - 1):
@@ -152,7 +261,7 @@ def get_cross_sectional_points(mask, smooth_window=20):
     """get the two cross sectional points that intersect the mask 
     for easy computation and storing. 
     included functionality for different sized masks - proportional smoothing window""" 
-    medial_line = np.column_stack(np.where(skeleton(mask)))
+    medial_line = np.column_stack(np.where(create_skeleton(mask)))
     total_length = len(medial_line)
     cross_section_points = []
     smooth_window = round((total_length)*(smooth_window/100)) # proportional smoothing window
@@ -239,8 +348,10 @@ def process_biometrics(root_predictions, pred_files):
         mask_path = os.path.join(root_predictions, file) # full path 
         mask = Image.open(mask_path)
         mask = np.array(mask)
-        mask = connect_clean_mask(mask) # connect tails, clean out artifacts
-        skeleton_TL = skeleton_length(mask) # extract medial tl
+        mask_cleaned = connect_clean_mask(mask) # connect tails, clean out artifacts
+        mask_skeleton = create_skeleton(mask_cleaned) # pull base skeleton 
+        skeleton_extended = compute_extended_path(mask_skeleton, mask_cleaned, num_points_src=5, num_points_dst=5)[3] # pull extended medial line
+        skeleton_TL = compute_extended_path_length(skeleton_extended) # extract medial tl
         body_area = mask_area(mask) # extract body area
         cross_sectional_points = get_cross_sectional_points(mask) # extract cx points
         body_span = get_widest_cross_section(cross_sectional_points)[1] # extract max span
@@ -316,7 +427,30 @@ def photogrammetric_conversion(df):
  
     return df
 
-## plotting functions ##
+## plotting functions ###############################################
+
+def plot_extended_path(extended_path, shortest_path, src_coords, dst_coords, img):
+    """
+    Plots the extended path along with the original skeleton, source, and destination.
+    Args:
+    - extended_path: The extended path to plot.
+    - shortest_path: The original shortest path.
+    - src_coords: Source coordinates.
+    - dst_coords: Destination coordinates.
+    - img: The image (binary mask) to plot.
+    """
+    shortest_path = np.array(shortest_path)
+
+    plt.imshow(img, cmap='gray')  # Display image/mask
+    plt.plot(extended_path[:, 1], extended_path[:, 0], color='yellow', label='Extended Skeleton')
+    plt.scatter(shortest_path[:, 1], shortest_path[:, 0], color='red', label='Skeleton points', s=8)
+    plt.scatter(src_coords[1], src_coords[0], color='blue', label='Source', s=11)
+    plt.scatter(dst_coords[1], dst_coords[0], color='green', label='Destination', s=11)
+    plt.legend()
+    plt.axis('off')
+    return plt.gcf()
+
+
 
 def plot_cross_sections(mask, cross_section_points):
     """plot the cross sections across the body"""
@@ -369,9 +503,9 @@ def plot_three_widest_cross_sections(mask, cross_section_points):####
 def plot_mask_with_skeleton_and_cross_sections(img, mask):
     """plot the mask with both the skeleton and the cross sections overlaid"""
     mask = connect_clean_mask(mask) # connect tails, clean out artifacts
-    
+
     #skeleton
-    skel_plot = skeleton(mask)
+    skel_plot = create_skeleton(mask)
     skeleton_coords = np.column_stack(np.where(skel_plot == 1))  # Get (y, x) coordinates of skeleton
 
     #widths
