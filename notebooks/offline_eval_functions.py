@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import pandas as pd
+import math
 import matplotlib.pyplot as plt
 import seaborn as sns
 from PIL import Image
@@ -172,18 +173,44 @@ def compute_extended_path(skeleton, mask, num_points_src=5, num_points_dst=5):
 
     return np.array(src_coords), np.array(dst_coords), np.array(shortest_path), np.array(extended_path)
 
-def compute_extended_path_length(extended_path):
+def resample_line(extended_path, num_points=20):
     """
-    Computes the length of the extended medial line. 
-    Args: extended_path as exported from compute_extended_path
-    Returns: length (pixels) 
+    Resample the medial line to evenly spaced points. 
+    Args: extended path: returned by compute_extended_path().
+    Returns: array of resampled points with num_points as defined above.
     """
-    length = 0.0
+    dist_cumulative = [0]  # Starting point has distance 0
     for i in range(1, len(extended_path)):
         dist = np.linalg.norm(extended_path[i] - extended_path[i - 1])
-        length += dist
+        dist_cumulative.append(dist_cumulative[-1] + dist)
     
-    return length
+    total_length = dist_cumulative[-1]  # Total length of the path
+    target_distances = np.linspace(0, total_length, num_points)  # Evenly spaced distances
+    resampled_points = []
+    for target_distance in target_distances:
+        for i in range(1, len(dist_cumulative)):
+            if dist_cumulative[i] >= target_distance:
+                p1 = extended_path[i - 1]
+                p2 = extended_path[i]
+                segment_length = dist_cumulative[i] - dist_cumulative[i - 1]
+                t = (target_distance - dist_cumulative[i - 1]) / segment_length
+                resampled_point = p1 + t * (p2 - p1)
+                resampled_points.append(resampled_point)
+                break
+    
+    return np.array(resampled_points)
+
+def line_length(resampled_points):
+    """
+    Calculate the total length of the resampled line.
+    Args: resampled_points: The resampled points along the medial line.
+    Returns:total_length: The total length of the resampled path.
+    """
+    total_length = 0.0
+    for i in range(1, len(resampled_points)):
+        dist = np.linalg.norm(resampled_points[i] - resampled_points[i - 1])
+        total_length += dist
+    return total_length
 
 def create_skeleton(mask):
     """input mask, get skeleton"""
@@ -204,10 +231,11 @@ def mask_area(mask):
 def get_cross_sectional_lengths(mask):
     """input mask, get cross sectional lengths down the body,
     in 1% increments, starting at pixel 20/ending at pixel -20"""
-    medial_line = np.column_stack(np.where(skeletonize(mask))) # extract medial line
+    medial_line_raw = compute_extended_path(create_skeleton(mask), mask, num_points_src=5, num_points_dst=5)[3] # medial line
+    medial_line = resample_line(medial_line_raw, num_points=20)
 
     directions = []
-    for i in range(1, len(medial_line) - 1):
+    for i in range(1, line_length(medial_line) - 1):
         # Get the neighboring points on the medial line to calculate direction
         p1 = medial_line[i - 1]
         p2 = medial_line[i + 1]
@@ -256,32 +284,38 @@ def find_intersection(mask, start_point, direction, max_distance=50):
     
     return None
 
-
-def get_cross_sectional_points(mask, smooth_window=20):
-    """get the two cross sectional points that intersect the mask 
-    for easy computation and storing. 
-    included functionality for different sized masks - proportional smoothing window""" 
-    medial_line = np.column_stack(np.where(create_skeleton(mask)))
-    total_length = len(medial_line)
+def get_cross_sectional_points(mask, smooth_window=20): ### does not take in smoothed medial line - may need to change here
+    """get the two cross-sectional points that intersect the mask
+    for easy computation and storing.
+    Includes functionality for different sized masks - proportional smoothing window"""
+    
+    # Compute medial line and its total length
+    medial_line = compute_extended_path(create_skeleton(mask), mask, num_points_src=5, num_points_dst=5)[3]
+    medial_length_idx = len(medial_line) # get number of entries in the array
+    total_length = math.floor(line_length(medial_line)) # get length in terms of pixels
+    
+    # Define the proportional smoothing window
+    smooth_window = math.floor(total_length * (smooth_window / 100))  # proportional smoothing window
     cross_section_points = []
-    smooth_window = round((total_length)*(smooth_window/100)) # proportional smoothing window
+    
+    # Loop over the medial line at 1% intervals (or an equivalent step)
+    step_size = max(1, total_length // 100) # 1% interval traversal
+    
+    for i in range(smooth_window, medial_length_idx - smooth_window, step_size):
+        p1 = medial_line[i - smooth_window]
+        p2 = medial_line[i + smooth_window]
+        direction = np.array([p2[1] - p1[1], p1[0] - p2[0]])  # Perpendicular direction
+        direction = direction / np.linalg.norm(direction)
 
-    for i in range(0, total_length, max(1, total_length // 100)): # 1% interval traversal
         point = medial_line[i]
-        
-        if i > smooth_window and i < total_length - smooth_window:
-            p1 = medial_line[i - smooth_window]
-            p2 = medial_line[i + smooth_window]
-            direction = np.array([p2[1] - p1[1], p1[0] - p2[0]])  # Perpendicular direction
-            direction = direction / np.linalg.norm(direction)  
-        
-            forward_intersection = find_intersection(mask, point, direction)
-            backward_intersection = find_intersection(mask, point, -direction)
-        
-            if forward_intersection and backward_intersection:
-                cross_section_points.append((forward_intersection, backward_intersection))
+        forward_intersection = find_intersection(mask, point, direction)
+        backward_intersection = find_intersection(mask, point, -direction)
 
+        if forward_intersection and backward_intersection:
+            cross_section_points.append((forward_intersection, backward_intersection))
+    
     return cross_section_points
+
 
 def get_widest_cross_section(cross_section_points):
     """Get the three widest cross sections (of 1%s) and their average distance."""
@@ -351,9 +385,10 @@ def process_biometrics(root_predictions, pred_files):
         mask_cleaned = connect_clean_mask(mask) # connect tails, clean out artifacts
         mask_skeleton = create_skeleton(mask_cleaned) # pull base skeleton 
         skeleton_extended = compute_extended_path(mask_skeleton, mask_cleaned, num_points_src=5, num_points_dst=5)[3] # pull extended medial line
-        skeleton_TL = compute_extended_path_length(skeleton_extended) # extract medial tl
-        body_area = mask_area(mask) # extract body area
-        cross_sectional_points = get_cross_sectional_points(mask) # extract cx points
+        skeleton_resampled = resample_line(skeleton_extended, num_points = 20) # resample to smooth
+        skeleton_TL = line_length(skeleton_resampled) # extract medial tl
+        body_area = mask_area(mask_cleaned) # extract body area
+        cross_sectional_points = get_cross_sectional_points(mask_cleaned) # extract cx points
         body_span = get_widest_cross_section(cross_sectional_points)[1] # extract max span
         image_name = file.replace('pred_', '').replace('.png', '.JPG') # revert image name
         data.append((image_name, skeleton_TL, body_area, body_span)) # append tuple 
@@ -451,7 +486,6 @@ def plot_extended_path(extended_path, shortest_path, src_coords, dst_coords, img
     return plt.gcf()
 
 
-
 def plot_cross_sections(mask, cross_section_points):
     """plot the cross sections across the body"""
     plt.imshow(mask, cmap='gray')
@@ -542,3 +576,19 @@ def plot_mask_with_skeleton_and_cross_sections(img, mask):
     
     plt.tight_layout()
     return fig # return the plot so you can use it
+
+def plot_resampled_points_with_extended_path(img, mask):
+    """
+    Plot the resampled points used to calculate medial line
+    Args: image and mask
+    Returns: printed plot of resampled points
+    """
+    src_coords, dst_coords, shortest_path, extended_path = compute_extended_path(create_skeleton(mask), mask, num_points_src=5, num_points_dst=5)
+    resampled_points = resample_line(extended_path)
+    img_copy = np.copy(img)
+    
+    plt.imshow(img_copy, cmap='gray')  # Display image/mask
+    plt.scatter(np.array(resampled_points)[:, 1], np.array(resampled_points)[:, 0], color='red', label='Resampled Points', s=3)    
+    plt.legend()
+    plt.axis('off')
+    plt.show()
