@@ -7,10 +7,10 @@ import seaborn as sns
 from PIL import Image
 from skimage.morphology import skeletonize
 from pycocotools.coco import COCO
-
-import numpy as np
+from skan import summarize, Skeleton
+from skan.csr import skeleton_to_csgraph
+from collections import deque
 import cv2
-import matplotlib.pyplot as plt
 
 def connect_clean_mask(mask, buffer_radius=10):
     """
@@ -76,11 +76,6 @@ def connect_clean_mask(mask, buffer_radius=10):
             draw_connection_line(connected_mask, point_main, point_sec)
 
     return connected_mask
-
-
-from skan import summarize, Skeleton
-from skan.csr import skeleton_to_csgraph
-from collections import deque
 
 def compute_extended_path(skeleton, mask, num_points_src=5, num_points_dst=5):
     """
@@ -213,26 +208,21 @@ def line_length(resampled_points):
     return total_length
 
 def create_skeleton(mask):
-    """input mask, get skeleton"""
+    """input mask, get initial, unfiltered, unlengthened skeleton"""
     mask = np.array(mask)
     skeleton = skeletonize(mask)
     return skeleton
-    
-def skeleton_length(mask): ### you're going to have to work on this here
-    """input mask, get skeleton length in pixels"""
-    skeleton_length = np.sum(skeletonize(mask))
-    return skeleton_length
 
 def mask_area(mask):
     """input mask, get area (pixels)"""
     area = np.sum(mask)
     return area
 
-def get_cross_sectional_lengths(mask):
+def get_cross_sectional_lengths(mask):  
     """input mask, get cross sectional lengths down the body,
-    in 1% increments, starting at pixel 20/ending at pixel -20"""
+    in 5% increments given the resampled medial line (which draws 20 points)"""
     medial_line_raw = compute_extended_path(create_skeleton(mask), mask, num_points_src=5, num_points_dst=5)[3] # medial line
-    medial_line = resample_line(medial_line_raw, num_points=20)
+    medial_line = resample_line(medial_line_raw, num_points=20) # pull medial line points (5% increments)
 
     directions = []
     for i in range(1, line_length(medial_line) - 1):
@@ -284,55 +274,92 @@ def find_intersection(mask, start_point, direction, max_distance=50):
     
     return None
 
-def get_cross_sectional_points(mask, smooth_window=20): ### does not take in smoothed medial line - may need to change here
-    """get the two cross-sectional points that intersect the mask
-    for easy computation and storing.
-    Includes functionality for different sized masks - proportional smoothing window"""
+def get_cross_sectional_points(resampled_points, mask):
+    """Get the two cross-sectional points at each of the resampled points along the medial line."""
     
-    # Compute medial line and its total length
-    medial_line = compute_extended_path(create_skeleton(mask), mask, num_points_src=5, num_points_dst=5)[3]
-    medial_length_idx = len(medial_line) # get number of entries in the array
-    total_length = math.floor(line_length(medial_line)) # get length in terms of pixels
-    
-    # Define the proportional smoothing window
-    smooth_window = math.floor(total_length * (smooth_window / 100))  # proportional smoothing window
+    total_length = len(resampled_points)  # resampled points (20 points)
     cross_section_points = []
-    
-    # Loop over the medial line at 1% intervals (or an equivalent step)
-    step_size = max(1, total_length // 100) # 1% interval traversal
-    
-    for i in range(smooth_window, medial_length_idx - smooth_window, step_size):
-        p1 = medial_line[i - smooth_window]
-        p2 = medial_line[i + smooth_window]
+    for i in range(1, total_length - 1):  # skip the first and last points
+        point = resampled_points[i]
+        
+        p1 = resampled_points[i - 1]
+        p2 = resampled_points[i + 1]
         direction = np.array([p2[1] - p1[1], p1[0] - p2[0]])  # Perpendicular direction
         direction = direction / np.linalg.norm(direction)
 
-        point = medial_line[i]
+        # Find the intersections in both directions (forward and backward)
         forward_intersection = find_intersection(mask, point, direction)
         backward_intersection = find_intersection(mask, point, -direction)
-
         if forward_intersection and backward_intersection:
             cross_section_points.append((forward_intersection, backward_intersection))
     
     return cross_section_points
 
-
-def get_widest_cross_section(cross_section_points):
-    """Get the three widest cross sections (of 1%s) and their average distance."""
-    distances = []
+def get_cross_sectional_percentiles_and_lengths(cross_section_points):
+    """ Inputs: cross section points returned from get_cross_sectional_points().
+    Returns two dictionaries:
+    1. Mapping cross-sectional points to their percentiles.
+    2. Mapping cross-sectional points to their lengths (distances)."""
     
-    for forward, backward in cross_section_points:
-        distance = np.linalg.norm(np.array(forward) - np.array(backward))
-        distances.append((distance, (forward, backward)))
+    # use the first and last distances to determine head/tail orientation
+    first_three_distances = [
+        np.linalg.norm(np.array(cross_section_points[i][0]) - np.array(cross_section_points[i][1])) 
+        for i in range(3)]  # First three points (5%, 10%, 15%)
 
-    distances.sort(reverse=True, key=lambda x: x[0])
-    top_three = distances[:3] # top three widths
-    top_three_pairs = [pair for _, pair in top_three]
-    top_three_distances = [distance for distance, _ in top_three]
-    average_distance = np.mean(top_three_distances)
+    last_three_distances = [
+        np.linalg.norm(np.array(cross_section_points[i][0]) - np.array(cross_section_points[i][1])) 
+        for i in range(-3, 0)]  # Last three points (85%, 90%, 95%)
     
-    return top_three_pairs, average_distance
+    if np.mean(first_three_distances) > np.mean(last_three_distances): head_is_top = True  # Head is at the top (first entries are larger)
+    else: head_is_top = False  # Tail is at the top (last entries are larger)
 
+    # initialize dictionaries
+    cross_section_percentiles = {}
+    cross_section_lengths = {}
+
+    # map cross-sectional points and lengths to percentiles
+    total_points = len(cross_section_points)
+    for i, (forward, backward) in enumerate(cross_section_points):
+        percentile = (i + 1) * 5 
+        length = np.linalg.norm(np.array(forward) - np.array(backward))
+
+        if head_is_top:
+            cross_section_percentiles[(tuple(forward), tuple(backward))] = percentile # map as expected
+            cross_section_lengths[(tuple(forward), tuple(backward))] = length
+        else:
+            cross_section_percentiles[(tuple(forward), tuple(backward))] = 100 - percentile # reverse the mapping
+            cross_section_lengths[(tuple(forward), tuple(backward))] = length
+
+    return cross_section_percentiles, cross_section_lengths
+
+def get_ls_fs_ps(cross_section_points, mask):
+    """Gets the points and lengths corresponding to the 25th (LS), 40th (FS), and 50th (PS) percentiles.
+    Inputs: cross section points returned from get_cross_sectional_points().
+    Returns: Dictionary with LS, FS, and PS mapped to the corresponding 'points' and 'length' """
+    
+    # get percentiles and lengths
+    cross_section_percentiles, cross_section_lengths = get_cross_sectional_percentiles_and_lengths(cross_section_points)
+    
+    # initialize dictionary
+    ls_fs_ps = {}
+    percentiles_of_interest = [25, 40, 50]
+    for percentile in percentiles_of_interest:
+        for (forward, backward), p in cross_section_percentiles.items(): # find cross sectional point
+            if p == percentile:
+                distance = cross_section_lengths[(tuple(forward), tuple(backward))]
+                if percentile == 25:
+                    ls_fs_ps["LS"] = {"points": (forward, backward),"length": distance}
+                elif percentile == 40:
+                    ls_fs_ps["FS"] = {"points": (forward, backward),"length": distance}
+                elif percentile == 50:
+                    ls_fs_ps["PS"] = {"points": (forward, backward), "length": distance}
+    return ls_fs_ps
+
+def compute_bodyspan(ls_fs_ps):
+    """Given the dictionary returned from get_ls_fs_ps, return body span as the average of these three lengths"""
+    average_length = (ls_fs_ps["LS"]["length"] + ls_fs_ps["FS"]["length"] + ls_fs_ps["PS"]["length"])/3
+
+    return average_length
 
 def get_mask_dims(annotations_path):
     """input annotations, get the bounding box
@@ -358,38 +385,24 @@ def get_mask_dims(annotations_path):
     return df
 
 ###
-def process_biometrics2(mask_list): 
-    """takes in existing masks (annotations) and performs computations"""
-    data = []  # store rows for df
-    for mask in mask_list:
-        mask = np.array(mask)
-        skeleton_TL = skeleton_length(mask) # extract medial tl
-        body_area = mask_area(mask) # extract body area
-        cross_sectional_points = get_cross_sectional_points(mask) # extract cx points
-        body_span = get_widest_cross_section(cross_sectional_points)[1] # extract max span
-        image_name = file.replace('pred_', '').replace('.png', '.JPG') # revert image name
-        data.append((image_name, skeleton_TL, body_area, body_span)) # append tuple 
-
-    df = pd.DataFrame(data, columns=['filename', 'skeleton_TL', 'body_area', 'body_span']) # construct df
-        
-    return(df)
-
-
 def process_biometrics(root_predictions, pred_files): 
-    """add morphometric variables"""
+    """compute morphometric variables from input pred_files, returns dataframe"""
     data = []  # store rows for df
     for file in pred_files:
         mask_path = os.path.join(root_predictions, file) # full path 
-        mask = Image.open(mask_path)
-        mask = np.array(mask)
+        mask_raw = Image.open(mask_path)
+        mask = np.array(mask_raw)
         mask_cleaned = connect_clean_mask(mask) # connect tails, clean out artifacts
+
         mask_skeleton = create_skeleton(mask_cleaned) # pull base skeleton 
         skeleton_extended = compute_extended_path(mask_skeleton, mask_cleaned, num_points_src=5, num_points_dst=5)[3] # pull extended medial line
-        skeleton_resampled = resample_line(skeleton_extended, num_points = 20) # resample to smooth
+        skeleton_resampled = resample_line(skeleton_extended, num_points = 20) # resampled points to smooth
         skeleton_TL = line_length(skeleton_resampled) # extract medial tl
         body_area = mask_area(mask_cleaned) # extract body area
-        cross_sectional_points = get_cross_sectional_points(mask_cleaned) # extract cx points
-        body_span = get_widest_cross_section(cross_sectional_points)[1] # extract max span
+
+        cross_sectional_points = get_cross_sectional_points(skeleton_resampled, mask_cleaned) # extract cx points
+        ls_fs_ps = get_ls_fs_ps(cross_sectional_points, mask_cleaned) # pull out the ls fs ps dictionary
+        body_span = compute_bodyspan(ls_fs_ps) # compute the average body span
         image_name = file.replace('pred_', '').replace('.png', '.JPG') # revert image name
         data.append((image_name, skeleton_TL, body_area, body_span)) # append tuple 
 
@@ -462,7 +475,7 @@ def photogrammetric_conversion(df):
  
     return df
 
-## plotting functions ###############################################
+## plotting functions ##################################################################################################
 
 def plot_extended_path(extended_path, shortest_path, src_coords, dst_coords, img):
     """
@@ -486,20 +499,37 @@ def plot_extended_path(extended_path, shortest_path, src_coords, dst_coords, img
     return plt.gcf()
 
 
-def plot_cross_sections(mask, cross_section_points):
+def plot_cross_sections(img, cross_section_points):
     """plot the cross sections across the body"""
-    plt.imshow(mask, cmap='gray')
-    
-    for forward, backward in cross_section_points:
-        plt.plot([forward[1], backward[1]], [forward[0], backward[0]], 'r-', alpha=0.5)  # Cross section line
-    
-    plt.title("Cross-Sectional Lines at 1% Intervals")
+import matplotlib.pyplot as plt
+
+def plot_cross_sections(img, cross_section_points):
+    """Plot the cross sections across the body and highlight the 25th, 40th, and 50th percentile lines in blue."""
+    plt.imshow(img, cmap='gray')
+    percentiles_positions = {
+        25: 5,    # 25th percentile corresponds to the 5th position 
+        40: 8,    # 40th percentile corresponds to the 8th position
+        50: 10     # 50th percentile corresponds to the 10th position
+    }
+    for i, (forward, backward) in enumerate(cross_section_points):
+        if i == percentiles_positions[25] - 1:  # 0-based index
+            color = 'blue'  # Highlight the 25th percentile line
+        elif i == percentiles_positions[40] - 1:  # 0-based index
+            color = 'blue'  # Highlight the 40th percentile line
+        elif i == percentiles_positions[50] - 1:  # 0-based index
+            color = 'blue'  # Highlight the 50th percentile line
+        else:
+            color = 'red'  # Default color for other lines
+        plt.plot([forward[1], backward[1]], [forward[0], backward[0]], color=color, alpha=0.5)
+
+    plt.title("Cross-Sectional Lines from Resampled Line")
     plt.show()
+
     
 def plot_widest_cross_section(mask, cross_section_points):
     """plot only the widest cross secton along the body"""
     # Find the widest cross section
-    widest_pair, max_distance = get_widest_cross_section(cross_section_points)
+    ###########widest_pair, max_distance = get_widest_cross_section(cross_section_points) - #get widest cross section no longer exists
 
     # Extract forward and backward points
     forward, backward = widest_pair[1]
@@ -516,35 +546,19 @@ def plot_widest_cross_section(mask, cross_section_points):
     plt.scatter([forward[1], backward[1]], [forward[0], backward[0]], color='blue', zorder=5)
     plt.show()
 
-def plot_three_widest_cross_sections(mask, cross_section_points):####
-    """plot top three widest cross sectons along the body"""
-    # Find the top three widest cross section
-    widest_pairs, max_distances = get_widest_cross_section(cross_section_points)
-
-    # Plot the mask
-    plt.imshow(mask, cmap='gray')
-    plt.title('Widest Cross Section on Mask')
-    plt.axis('off')
-
-    # Extract forward and backward points
-    for pair in widest_pairs:
-        forward, backward = pair[0], pair[1]
-        plt.plot([forward[1], backward[1]], [forward[0], backward[0]], color='red', linewidth=2, linestyle='--')
-        plt.scatter([forward[1], backward[1]], [forward[0], backward[0]], color='blue', zorder=5)
-
-    plt.show()
-
 def plot_mask_with_skeleton_and_cross_sections(img, mask):
     """plot the mask with both the skeleton and the cross sections overlaid"""
-    mask = connect_clean_mask(mask) # connect tails, clean out artifacts
+    mask_cleaned = connect_clean_mask(mask) # connect tails, clean out artifacts
 
     #skeleton
     skel_plot = create_skeleton(mask)
-    skeleton_coords = np.column_stack(np.where(skel_plot == 1))  # Get (y, x) coordinates of skeleton
+    mask_skeleton = create_skeleton(mask_cleaned)
+    skeleton_extended = compute_extended_path(mask_skeleton, mask_cleaned, num_points_src=5, num_points_dst=5)[3] # pull extended medial line
+    skeleton_resampled = resample_line(skeleton_extended) # resampled points to smooth
 
     #widths
-    cross_section_points = get_cross_sectional_points(mask, smooth_window=20)
-    widest_pairs, max_distances = get_widest_cross_section(cross_section_points)
+    cross_sectional_points = get_cross_sectional_points(skeleton_resampled, mask_cleaned) # extract cx points
+    ls_fs_ps = get_ls_fs_ps(cross_sectional_points, mask)
 
     # plotting two panels side by side
     fig, axes = plt.subplots(1, 2, figsize=(12, 6))  # 1 row, 2 columns
@@ -555,27 +569,46 @@ def plot_mask_with_skeleton_and_cross_sections(img, mask):
     ax1.set_facecolor('black')  # Set the background of the axes to black
     ax1.imshow(mask, cmap='gray', vmin=0, vmax=255, alpha=0.5)
 
-    for y, x in skeleton_coords:
+    for y, x in skeleton_resampled:
         ax1.plot(x, y, 'ro', markersize=1, alpha=0.8)  # Plot each skeleton point as a red dot
 
-    for pair in widest_pairs:
-        forward, backward = pair[0], pair[1]
-        ax1.plot([forward[1], backward[1]], [forward[0], backward[0]], color='red', linewidth=2, linestyle='--')
-        ax1.scatter([forward[1], backward[1]], [forward[0], backward[0]], color='blue', zorder=5)
+    # Plot LS (25th percentile)
+    ls_points = ls_fs_ps.get("LS", {}).get("points", None)
+    if ls_points:
+        forward, backward = ls_points
+        ax1.plot([forward[1], backward[1]], [forward[0], backward[0]], 'r-', linewidth=2)
+        ax1.scatter([forward[1], backward[1]], [forward[0], backward[0]], color='red', zorder=5)
+
+    # Plot FS (40th percentile)
+    fs_points = ls_fs_ps.get("FS", {}).get("points", None)
+    if fs_points:
+        forward, backward = fs_points
+        ax1.plot([forward[1], backward[1]], [forward[0], backward[0]], 'r-', linewidth=2)
+        ax1.scatter([forward[1], backward[1]], [forward[0], backward[0]], color='red', zorder=5)
+
+    # Plot PS (50th percentile)
+    ps_points = ls_fs_ps.get("PS", {}).get("points", None)
+    if ps_points:
+        forward, backward = ps_points
+        ax1.plot([forward[1], backward[1]], [forward[0], backward[0]], 'r-', linewidth=2)
+        ax1.scatter([forward[1], backward[1]], [forward[0], backward[0]], color='red', zorder=5)
 
     ax1.set_title('Morphometrics Mask', color='white')  # Title in white for visibility
     ax1.axis('off')  # Hide axis
 
-    # plot original image
+    # Plot original image
     ax2 = axes[1]
-    ax2.set_facecolor('black') 
+    ax2.set_facecolor('black')
     ax2.imshow(img, cmap='gray', vmin=0, vmax=255)
-    
-    ax2.set_title('Original Image', color='white')  # title for the original image
-    ax2.axis('off')  # hide axis
-    
+
+    ax2.set_title('Original Image', color='white')  # Title for the original image
+    ax2.axis('off')  # Hide axis
+
+    # Add legend
+    ax1.legend(['LS', 'FS', 'PS'])
+
     plt.tight_layout()
-    return fig # return the plot so you can use it
+    return fig  # Return the plot so you can use it
 
 def plot_resampled_points_with_extended_path(img, mask):
     """
@@ -591,4 +624,29 @@ def plot_resampled_points_with_extended_path(img, mask):
     plt.scatter(np.array(resampled_points)[:, 1], np.array(resampled_points)[:, 0], color='red', label='Resampled Points', s=3)    
     plt.legend()
     plt.axis('off')
+    plt.show()
+
+
+def plot_ls_fs_ps(cross_section_points, mask, img):
+    """Plot the LS, FS, and PS lines on the original image."""
+    ls_fs_ps = get_ls_fs_ps(cross_section_points, mask)
+    plt.imshow(img, cmap='gray')  # Plot the original mask (image)
+    
+    ls_points = ls_fs_ps.get("LS", {}).get("points", None) # LS (25th)
+    if ls_points:
+        forward, backward = ls_points
+        plt.plot([forward[1], backward[1]], [forward[0], backward[0]], 'b-', linewidth=2, label='LS (25%)')
+
+    fs_points = ls_fs_ps.get("FS", {}).get("points", None) # FS (40th)
+    if fs_points:
+        forward, backward = fs_points
+        plt.plot([forward[1], backward[1]], [forward[0], backward[0]], 'g-', linewidth=2, label='FS (40%)')
+
+    ps_points = ls_fs_ps.get("PS", {}).get("points", None) # PS (50th)
+    if ps_points:
+        forward, backward = ps_points
+        plt.plot([forward[1], backward[1]], [forward[0], backward[0]], 'r-', linewidth=2, label='PS (50%)')
+    
+    plt.title("Cross-Sectional Lines (LS, FS, PS)")
+    plt.legend()
     plt.show()
