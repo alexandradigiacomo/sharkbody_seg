@@ -92,7 +92,7 @@ if __name__ == '__main__':
     if not os.path.exists(cfg['path_data']):
         SharkBody.download(cfg['path_data'])
     
-    val_set = SharkBody(cfg, split="train") #### make sure you change this!!!
+    val_set = SharkBody(cfg, split="val") ## this is split dependent (change for test!!!)
     output_dir = Path(cfg['path_checkpoints']) / 'predictions'
     output_dir.mkdir(parents=True, exist_ok=True)
 
