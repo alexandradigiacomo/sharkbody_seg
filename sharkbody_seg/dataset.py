@@ -10,8 +10,9 @@ import matplotlib.pyplot as plt
 from pycocotools import mask as coco_mask
 from pycocotools.coco import COCO
 import numpy as np
+import pandas as pd
 
-def sharkBodyCrop(image, mask, crop_size=None, is_centered=True):
+def sharkBodyCrop(image, mask, crop_size=None, is_centered=True, center_y=None, center_x=None):
     """
     Crops the input img to a random pixel within the shark
     Args:
@@ -31,7 +32,8 @@ def sharkBodyCrop(image, mask, crop_size=None, is_centered=True):
 
     if is_centered: # pull in annotated center point
         if center_y is None or center_x is None:
-            raise ValueError("Center coordinates must be provided when is_centered=True.")
+            center_y, center_x = 0,0
+            ###raise ValueError("Center coordinates must be provided when is_centered=True.")
         c_y, c_x = center_y, center_x # center coordinates of crop
 
     if is_centered is False: 
@@ -130,7 +132,7 @@ class SharkBody(Dataset):
                 'image_id': image_id,
                 'file_name': file_name,
                 'mask': Image.fromarray(binary_mask),
-                'relative_altitude': relative_altitude 
+                'relative_altitude': relative_altitude
             })
 
     def __len__(self):
@@ -144,10 +146,12 @@ class SharkBody(Dataset):
         img = Image.open(image_path).convert('RGB')  # open image
         mask = self.data[idx]['mask'] # pull mask
         is_centered = self.cfg['is_centered'] # is the mask centered
-        if is_centered: # get center coords from csv
+        if is_centered: # if it is centered, grap coords
             center_y, center_x = self.center_dict.get(image_name, (None, None))
             if center_y is None or center_x is None:
-                raise ValueError(f"Center coordinates for {image_name} not found in centerpoints.csv")
+                center_y, center_x = 0,0
+                ###raise ValueError(f"Center coordinates for {image_name} not found in centerpoints.csv")
+
         img_width, img_height = img.size # pull size
 
         # cropping
@@ -156,7 +160,7 @@ class SharkBody(Dataset):
         else:
             crop_size = self.cfg['crop_size']  # Use default crop size from the config
 
-        img_cropped, mask_cropped, _ = sharkBodyCrop(img, mask, crop_size=crop_size, is_centered=is_centered)
+        img_cropped, mask_cropped, _ = sharkBodyCrop(img, mask, crop_size=crop_size, is_centered=is_centered, center_y=center_y, center_x=center_x)
 
         img_tensor = self.transform(img_cropped)
         mask_tensor = self.transform(mask_cropped)
