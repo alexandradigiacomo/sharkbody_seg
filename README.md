@@ -1,5 +1,7 @@
 # sharkbody_seg 
-sharkBody_seg is a pipeline for segmenting the body of white sharks in aerial imagery using U-Net segmentation and extracting morphometric measurements total length and body spans. This repository is built on top of [Segmentation Models PyTorch](https://github.com/qubvel-org/segmentation_models.pytorch) and has been adapted specifically for white shark measurement applications.  
+This repository contains the processing scripts associated with DiGiacomo et al., 2026 Ontogenetic shifts in ecology and morphology of eastern Pacific white sharks revealed by computer vision (PLOS One).
+
+sharkbody_seg is a pipeline for segmenting the body of white sharks in aerial imagery using U-Net segmentation and extracting morphometric measurements total length and body spans. This repository is built on top of [Segmentation Models PyTorch](https://github.com/qubvel-org/segmentation_models.pytorch) and has been adapted specifically for white shark measurement applications.  
 
 ## Features
 - **White Shark Body Segmentation:** Automatically generates pixel-wise masks of white shark bodies from aerial imagery.  
