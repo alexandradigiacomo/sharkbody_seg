@@ -1,0 +1,11 @@
+[project]
+name = "sharkbody_seg"
+version = "0.1.0"
+description = "Repository for segmentation of shark bodies from aerial imagery"
+authors = [
+    {name = "Alexandra DiGiacomo", email = "alexandraedigiacomo@gmail.com"},
+]
+dynamic = ["dependencies", "optional-dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }

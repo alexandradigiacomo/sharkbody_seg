@@ -1,0 +1,32 @@
+name: shark_env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12
+  - r-base=4.3
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  - seaborn
+  - scikit-learn
+  - jupyterlab
+  - notebook
+  - pip
+  - pip:
+      - segmentation-models-pytorch
+      - torch
+      - torchvision
+      - torchaudio
+      - opencv-python
+      - tqdm
+      - Pillow
+      - plotly
+      - geopandas
+      - shapely
+      - folium
+      - pyproj
+      - fiona
+      - rasterio
+      - ipywidgets
