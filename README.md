@@ -1,13 +1,7 @@
 # sharkbody_seg 
-This repository contains the processing scripts associated with DiGiacomo et al., 2026 Ontogenetic shifts in ecology and morphology of eastern Pacific white sharks revealed by computer vision (PLOS One).
+This repository contains the processing scripts associated with DiGiacomo et al., 2026 Ontogenetic shifts in ecology and morphology of eastern Pacific white sharks revealed by computer vision (https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0348174).
 
 sharkbody_seg is a pipeline for segmenting the body of white sharks in aerial imagery using U-Net segmentation and extracting morphometric measurements total length and body spans. This repository is built on top of [Segmentation Models PyTorch](https://github.com/qubvel-org/segmentation_models.pytorch) and has been adapted specifically for white shark measurement applications.  
-
-## Features
-- **White Shark Body Segmentation:** Automatically generates pixel-wise masks of white shark bodies from aerial imagery.  
-- **Kinematic Parameter Extraction:** Computes total length and body span measurements directly from the segmentation masks.  
-- **PyTorch-based:** Leverages modern deep learning architectures for semantic segmentation.  
-- **Flexible and Extensible:** Can be adapted for other marine species or aerial imaging datasets.  
 
 ## Dataset 
 Original dataset is available at Stanford Data Repository: https://doi.org/10.25740/tr054mz8990. 
@@ -15,6 +9,11 @@ Original dataset is available at Stanford Data Repository: https://doi.org/10.25
 Folder dataset/ contains original imagery, labels, and metadata
 Folder runs/ contains model configurations, runs, and checkpoint files
 
+## Repository Features
+- **White Shark Body Segmentation:** Automatically generates pixel-wise masks of white shark bodies from aerial imagery.  
+- **Morphometric Parameter Extraction:** Computes total length and body span measurements directly from segmentation masks.  
+- **PyTorch-based:** Leverages modern deep learning architectures for semantic segmentation.  
+- **Flexible and Extensible:** Can be adapted for other marine megafauna or aerial imaging datasets.  
 
 ## Installation
 ```
